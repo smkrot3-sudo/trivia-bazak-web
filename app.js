@@ -1,0 +1,783 @@
+(function () {
+  'use strict';
+  const $app = document.getElementById('app');
+  const Q = window.QUESTIONS, CATS = window.CATEGORIES;
+
+  // ---------- אחסון ----------
+  // (בדיקות: ?u=x נותן לכל לשונית פרופיל נפרד)
+  const PFX = 'tb_' + ((location.search.match(/[?&]u=(\w+)/) || [])[1] || '');
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem(PFX + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem(PFX + k, JSON.stringify(v)); } catch (e) {} }
+  };
+  const profile = store.get('profile', null) || {};
+  if (!profile.pid) { profile.pid = 'p' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36); }
+  if (profile.sound === undefined) profile.sound = true;
+  const saveProfile = () => store.set('profile', profile);
+  saveProfile();
+
+  // ---------- עזרים ----------
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const shuffle = a => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+  const LEVELS = { easy: 'קל', medium: 'בינוני', hard: 'קשה', mixed: 'מעורב' };
+  const LEVEL_DIFF = { easy: 1, medium: 2, hard: 3 };
+  const Q_TIME = { easy: 20, medium: 15, hard: 12, mixed: 15 };
+  const MODES = { classic: 'קלאסי', sprint: 'ספרינט 60 שניות', online: 'אונליין' };
+  const KEYS = ['א', 'ב', 'ג', 'ד'];
+
+  let timers = [];
+  let backHandler = null;
+  const later = (fn, ms) => { const t = setTimeout(fn, ms); timers.push(t); return t; };
+  function clearTimers() { timers.forEach(clearTimeout); timers = []; if (raf) cancelAnimationFrame(raf); raf = null; }
+  let raf = null;
+
+  function show(html, onBack) {
+    clearTimers();
+    closeModal();
+    $app.innerHTML = '<div class="screen">' + html + '</div>';
+    backHandler = onBack || null;
+    window.scrollTo(0, 0);
+  }
+  const on = (sel, fn, ev) => { const el = typeof sel === 'string' ? $app.querySelector(sel) : sel; if (el) el.addEventListener(ev || 'click', fn); return el; };
+  const onAll = (sel, fn) => $app.querySelectorAll(sel).forEach(el => el.addEventListener('click', () => fn(el)));
+
+  let toastT;
+  function toast(msg, ms) {
+    const t = document.getElementById('toast');
+    t.textContent = msg; t.classList.add('show');
+    clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), ms || 2200);
+  }
+
+  function modal(title, text, buttons) {
+    closeModal();
+    const bg = document.createElement('div'); bg.className = 'modal-bg'; bg.id = 'modal';
+    bg.innerHTML = '<div class="modal"><h3>' + esc(title) + '</h3>' + (text ? '<div class="muted">' + esc(text) + '</div>' : '') +
+      '<div class="row">' + buttons.map((b, i) => '<button class="btn small ' + (b.cls || '') + '" data-i="' + i + '">' + esc(b.label) + '</button>').join('') + '</div></div>';
+    document.body.appendChild(bg);
+    bg.querySelectorAll('button').forEach(btn => btn.onclick = () => { closeModal(); const b = buttons[+btn.dataset.i]; b.fn && b.fn(); });
+  }
+  function closeModal() { const m = document.getElementById('modal'); if (m) m.remove(); }
+
+  // כפתור "חזור" של אנדרואיד
+  window.onAndroidBack = function () {
+    if (document.getElementById('modal')) { closeModal(); return true; }
+    if (backHandler) { backHandler(); return true; }
+    return false;
+  };
+
+  // ---------- צליל ורטט ----------
+  let actx = null;
+  function beep(freq, dur, type) {
+    if (!profile.sound) return;
+    try {
+      actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+      const o = actx.createOscillator(), g = actx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.18, actx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur);
+      o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + dur);
+    } catch (e) {}
+  }
+  const sfx = {
+    good() { beep(660, .12); setTimeout(() => beep(990, .18), 90); },
+    bad() { beep(180, .3, 'square'); vibrate(180); },
+    tick() { beep(880, .05); },
+    end() { beep(523, .15); setTimeout(() => beep(659, .15), 140); setTimeout(() => beep(784, .3), 280); },
+    click() { beep(520, .035, 'sine'); }
+  };
+  function vibrate(ms) {
+    if (!profile.sound) return;
+    try { if (window.Android && Android.vibrate) Android.vibrate(ms); else if (navigator.vibrate) navigator.vibrate(ms); } catch (e) {}
+  }
+
+  // כל לחיצה על כפתור בכל מסך (כולל כפתורי מודאל) משמיעה צליל קליק קצר,
+  // לפני שהטיפול הספציפי בכפתור (כמו נכון/טעות) מתבצע
+  document.addEventListener('click', e => {
+    const btn = e.target.closest('button');
+    if (btn && !btn.disabled) sfx.click();
+  }, true);
+
+  // ---------- בחירת שאלות ----------
+  function poolFor(level, cat) {
+    const out = [];
+    for (let i = 0; i < Q.length; i++) {
+      const q = Q[i];
+      if (level !== 'mixed' && q[1] !== LEVEL_DIFF[level]) continue;
+      if (cat && cat !== 'all' && q[0] !== cat) continue;
+      out.push(i);
+    }
+    return out;
+  }
+  function pickQuestions(level, cat, n) {
+    const pool = poolFor(level, cat);
+    const seen = new Set(store.get('seen', []));
+    const fresh = shuffle(pool.filter(i => !seen.has(i)));
+    const old = shuffle(pool.filter(i => seen.has(i)));
+    const ids = fresh.concat(old).slice(0, n);
+    markSeen(ids);
+    return ids;
+  }
+  function markSeen(ids) {
+    const seen = store.get('seen', []).filter(i => ids.indexOf(i) < 0).concat(ids);
+    store.set('seen', seen.slice(-Math.floor(Q.length * 0.7)));
+  }
+
+  function questionHtml(id, num, total) {
+    const q = Q[id];
+    const opts = shuffle([0, 1, 2, 3]);
+    const c = CATS[q[0]];
+    return {
+      opts,
+      html:
+        '<div class="qcat">' + c.icon + ' ' + esc(c.name) + (total ? ' · שאלה ' + num + ' מתוך ' + total : '') + '</div>' +
+        '<div class="question">' + esc(q[2]) + '</div>' +
+        '<div class="answers">' + opts.map((o, i) =>
+          '<button class="answer" data-o="' + o + '"><span class="k">' + KEYS[i] + '</span><span>' + esc(q[3 + o]) + '</span></button>').join('') +
+        '</div>'
+    };
+  }
+
+  // פס זמן חלק
+  function runTimer(barSel, labelSel, seconds, onEnd, getExtra) {
+    const bar = $app.querySelector(barSel), label = labelSel ? $app.querySelector(labelSel) : null;
+    const start = performance.now();
+    let lastSec = null, stopped = false;
+    const api = {
+      remaining: seconds, stop() { stopped = true; if (raf) cancelAnimationFrame(raf); },
+      elapsed() { return (performance.now() - start) / 1000; }
+    };
+    function frame(now) {
+      if (stopped) return;
+      const extra = getExtra ? getExtra() : 0;
+      const rem = Math.max(0, seconds - (now - start) / 1000 + extra);
+      api.remaining = rem;
+      if (bar) {
+        bar.firstElementChild.style.transform = 'scaleX(' + Math.min(1, rem / seconds) + ')';
+        bar.classList.toggle('low', rem <= Math.min(5, seconds * 0.3));
+      }
+      const s = Math.ceil(rem);
+      if (label && s !== lastSec) { label.textContent = s; if (s <= 3 && s > 0 && lastSec !== null) sfx.tick(); lastSec = s; }
+      if (rem <= 0) { stopped = true; onEnd(); return; }
+      raf = requestAnimationFrame(frame);
+    }
+    raf = requestAnimationFrame(frame);
+    return api;
+  }
+
+  // ================= מסכים =================
+
+  function home() {
+    if (!profile.name) return nameScreen(home);
+    show(
+      '<div class="logo"><span class="bolt">⚡</span><h1>טריוויה <span>בזק</span></h1><p>' + Q.length + ' שאלות ב-' + Object.keys(CATS).length + ' נושאים</p></div>' +
+      '<div class="card center">שלום, <b>' + esc(profile.name) + '</b> 👋 <a href="#" id="rename" class="muted" style="font-size:14px">שינוי שם</a></div>' +
+      '<button class="btn primary" id="solo"><span class="emoji">⏱️</span><span class="col">משחק יחיד<span class="sub">נגד השעון, ברמה שתבחר</span></span></button>' +
+      '<button class="btn blue" id="online"><span class="emoji">👥</span><span class="col">אונליין עם חברים<span class="sub">ראש בראש או חדר עם קוד</span></span></button>' +
+      '<button class="btn" id="lb"><span class="emoji">🏆</span><span class="col">טבלת מובילים<span class="sub">השיאים של כל השחקנים</span></span></button>' +
+      '<div class="spacer"></div>' +
+      '<button class="btn ghost small" id="sound">' + (profile.sound ? '🔊 צלילים ורטט: פועל' : '🔇 צלילים ורטט: כבוי') + '</button>'
+    );
+    on('#solo', soloSetup);
+    on('#online', onlineMenu);
+    on('#lb', () => leaderboard());
+    on('#rename', e => { e.preventDefault(); nameScreen(home); });
+    on('#sound', () => { profile.sound = !profile.sound; saveProfile(); home(); });
+  }
+
+  function nameScreen(next) {
+    show(
+      '<div class="logo"><span class="bolt">⚡</span><h1>טריוויה <span>בזק</span></h1></div>' +
+      '<div class="card"><div class="label">איך לקרוא לך? (יופיע לחברים ובטבלת המובילים)</div>' +
+      '<input class="field" id="name" maxlength="16" placeholder="הכינוי שלך" value="' + esc(profile.name || '') + '"></div>' +
+      '<button class="btn primary" id="ok">יאללה!</button>',
+      profile.name ? next : null
+    );
+    const inp = $app.querySelector('#name');
+    const go = () => {
+      const v = inp.value.trim().slice(0, 16);
+      if (!v) { toast('צריך לכתוב כינוי'); return; }
+      profile.name = v; saveProfile(); next();
+    };
+    on('#ok', go);
+    on(inp, e => { if (e.key === 'Enter') go(); }, 'keydown');
+  }
+
+  // ---------- משחק יחיד ----------
+  const soloCfg = store.get('soloCfg', { mode: 'classic', level: 'easy', cat: 'all' });
+
+  function chipsHtml(group, items, current) {
+    return '<div class="chips">' + Object.keys(items).map(k =>
+      '<button class="chip' + (k === current ? ' on' : '') + '" data-g="' + group + '" data-v="' + k + '">' + esc(items[k]) + '</button>').join('') + '</div>';
+  }
+
+  function soloSetup() {
+    const catItems = { all: '🎲 הכול' };
+    Object.keys(CATS).forEach(k => catItems[k] = CATS[k].icon + ' ' + CATS[k].name);
+    const best = store.get('best:' + soloCfg.mode + ':' + soloCfg.level + ':' + soloCfg.cat, 0);
+    show(
+      '<div class="topbar"><button class="iconbtn" id="back">→</button><h2>משחק יחיד</h2></div>' +
+      '<div class="card"><div class="label">סוג משחק</div>' +
+      chipsHtml('mode', { classic: '🎯 קלאסי – 10 שאלות', sprint: '⚡ ספרינט 60 שניות' }, soloCfg.mode) +
+      '<div class="muted" style="font-size:14px;margin-top:10px">' + (soloCfg.mode === 'classic'
+        ? 'זמן מוגבל לכל שאלה. ככל שעונים מהר יותר - יותר נקודות.'
+        : 'כמה שיותר תשובות נכונות בדקה. טעות מורידה 3 שניות, רצף מוסיף בונוס.') + '</div></div>' +
+      '<div class="card"><div class="label">רמת קושי</div>' + chipsHtml('level', LEVELS, soloCfg.level) + '</div>' +
+      '<div class="card"><div class="label">נושא</div>' + chipsHtml('cat', catItems, soloCfg.cat) +
+      (soloCfg.cat !== 'all' ? '<div class="muted" style="font-size:13px;margin-top:8px">רק משחקים בכל הנושאים נכנסים לטבלת המובילים</div>' : '') + '</div>' +
+      '<div class="center muted">השיא שלך כאן: <b style="color:var(--accent)">' + best + '</b></div>' +
+      '<div class="spacer"></div><button class="btn primary" id="go">התחל ▶</button>',
+      home
+    );
+    on('#back', home);
+    onAll('.chip', el => { soloCfg[el.dataset.g] = el.dataset.v; store.set('soloCfg', soloCfg); soloSetup(); });
+    on('#go', () => soloGame(Object.assign({}, soloCfg)));
+  }
+
+  function confirmQuit(onYes) {
+    modal('לצאת מהמשחק?', 'ההתקדמות במשחק הזה תאבד.', [
+      { label: 'להמשיך לשחק', cls: 'primary' },
+      { label: 'לצאת', fn: onYes }
+    ]);
+  }
+
+  function soloGame(cfg) {
+    const sprint = cfg.mode === 'sprint';
+    const ids = pickQuestions(cfg.level, cfg.cat, sprint ? 999 : 10);
+    if (!ids.length) { toast('אין שאלות לבחירה הזו'); return soloSetup(); }
+    const st = { i: 0, score: 0, correct: 0, streak: 0, bestStreak: 0, penalty: 0, answered: 0 };
+    const T = Q_TIME[cfg.level];
+    let sprintTimer = null;
+    const quit = () => confirmQuit(() => { if (sprintTimer) sprintTimer.stop(); soloSetup(); });
+
+    function finish() {
+      clearTimers();
+      soloResults(cfg, st);
+    }
+
+    function render() {
+      if (st.i >= ids.length) return finish();
+      const id = ids[st.i];
+      const qh = questionHtml(id, st.i + 1, sprint ? 0 : ids.length);
+      const hud =
+        '<div class="hud"><button class="iconbtn" id="quit">✕</button>' +
+        '<span class="pill score">⭐ ' + st.score + '</span>' +
+        (sprint ? '<span class="pill">✔ ' + st.correct + '</span>' + (st.streak >= 2 ? '<span class="pill">🔥 ' + st.streak + '</span>' : '') : '<span class="pill">' + (st.i + 1) + '/' + ids.length + '</span>') +
+        '<span class="spacer"></span><span class="bigtime" id="tl"></span></div>' +
+        '<div class="timer" id="tb"><div></div></div>';
+      if (sprint && sprintTimer) {
+        // ספרינט: הטיימר ממשיך לרוץ, מחליפים רק את השאלה
+        $app.querySelector('#qarea').innerHTML = qh.html + '<div class="flash" id="flash"></div>';
+        const pills = $app.querySelector('.hud');
+        pills.querySelector('.score').textContent = '⭐ ' + st.score;
+        const p = pills.querySelectorAll('.pill');
+        p[1].textContent = '✔ ' + st.correct;
+        if (p[2]) p[2].remove();
+        if (st.streak >= 2) { const s = document.createElement('span'); s.className = 'pill'; s.textContent = '🔥 ' + st.streak; p[1].after(s); }
+      } else {
+        $app.innerHTML = '<div class="screen">' + hud + '<div id="qarea" style="display:flex;flex-direction:column;gap:14px">' + qh.html + '<div class="flash" id="flash"></div></div></div>';
+        backHandler = quit;
+        on('#quit', quit);
+      }
+      let locked = false;
+      let qTimer = null;
+      const qStart = performance.now();
+      if (sprint) {
+        if (!sprintTimer) sprintTimer = runTimer('#tb', '#tl', 60, finish, () => -st.penalty);
+      } else {
+        qTimer = runTimer('#tb', '#tl', T, () => answer(null));
+      }
+      $app.querySelectorAll('.answer').forEach(b => b.addEventListener('click', () => answer(b)));
+
+      function answer(btn) {
+        if (locked) return; locked = true;
+        if (qTimer) qTimer.stop();
+        const ok = btn && btn.dataset.o === '0';
+        const flash = $app.querySelector('#flash');
+        $app.querySelectorAll('.answer').forEach(b => {
+          if (b.dataset.o === '0') b.classList.add('correct');
+          else if (b === btn) b.classList.add('wrong');
+          else b.classList.add('dim');
+        });
+        st.answered++;
+        if (ok) {
+          st.correct++; st.streak++; st.bestStreak = Math.max(st.bestStreak, st.streak);
+          let pts;
+          if (sprint) pts = 100 + Math.min(st.streak - 1, 5) * 20;
+          else {
+            const rem = Math.max(0, T - (performance.now() - qStart) / 1000);
+            pts = 100 + Math.round(100 * rem / T);
+          }
+          st.score += pts;
+          flash.className = 'flash good'; flash.textContent = '+' + pts + (st.streak >= 3 ? '  🔥 רצף ' + st.streak : '');
+          sfx.good();
+        } else {
+          st.streak = 0;
+          if (sprint) { st.penalty += 3; flash.textContent = '−3 שניות'; }
+          else flash.textContent = btn ? 'טעות!' : 'נגמר הזמן!';
+          flash.className = 'flash bad';
+          sfx.bad();
+        }
+        st.i++;
+        later(render, sprint ? (ok ? 450 : 900) : 1300);
+      }
+    }
+    render();
+  }
+
+  function soloResults(cfg, st) {
+    sfx.end();
+    const key = 'best:' + cfg.mode + ':' + cfg.level + ':' + cfg.cat;
+    const prev = store.get(key, 0);
+    const isBest = st.score > prev;
+    if (isBest) store.set(key, st.score);
+    const canSubmit = cfg.cat === 'all' && st.score > 0;
+    const pct = st.answered ? Math.round(100 * st.correct / st.answered) : 0;
+    show(
+      '<div class="topbar"><button class="iconbtn" id="back">→</button><h2>סיום!</h2></div>' +
+      '<div class="center muted">' + esc(MODES[cfg.mode]) + ' · ' + esc(LEVELS[cfg.level]) + (cfg.cat !== 'all' ? ' · ' + esc(CATS[cfg.cat].name) : '') + '</div>' +
+      '<div class="bigscore">' + st.score + '</div>' +
+      '<div class="center">' + (isBest ? '<span class="badge">🎉 שיא אישי חדש!</span>' : '<span class="muted">השיא שלך: ' + prev + '</span>') + '</div>' +
+      '<div class="stats"><div class="stat"><b>' + st.correct + '/' + st.answered + '</b><span>נכונות</span></div>' +
+      '<div class="stat"><b>' + pct + '%</b><span>דיוק</span></div>' +
+      '<div class="stat"><b>' + st.bestStreak + '</b><span>רצף הכי ארוך</span></div></div>' +
+      '<div class="center muted" id="sub">' + (canSubmit ? 'שומר בטבלת המובילים...' : '') + '</div>' +
+      '<div class="spacer"></div>' +
+      '<button class="btn primary" id="again">שחק שוב 🔁</button>' +
+      '<div class="row"><button class="btn small" id="lb">🏆 מובילים</button><button class="btn small" id="home">🏠 בית</button></div>',
+      soloSetup
+    );
+    on('#back', soloSetup);
+    on('#again', () => soloGame(cfg));
+    on('#home', home);
+    on('#lb', () => leaderboard(cfg.mode, cfg.level));
+    if (canSubmit) {
+      Net.submitScore({ player_id: profile.pid, name: profile.name, mode: cfg.mode, level: cfg.level, score: Math.min(st.score, 5000), correct: Math.min(st.correct, 100) })
+        .then(() => { const s = $app.querySelector('#sub'); if (s) s.textContent = '✓ נשמר בטבלת המובילים'; })
+        .catch(() => { const s = $app.querySelector('#sub'); if (s) s.textContent = 'לא נשמר בטבלה (אין חיבור לאינטרנט)'; });
+    }
+  }
+
+  // ---------- טבלת מובילים ----------
+  let lbState = { mode: 'classic', level: 'easy' };
+  function leaderboard(mode, level) {
+    if (mode) lbState.mode = mode;
+    if (level) lbState.level = level;
+    show(
+      '<div class="topbar"><button class="iconbtn" id="back">→</button><h2>🏆 טבלת מובילים</h2></div>' +
+      chipsHtml('mode', { classic: 'קלאסי', sprint: 'ספרינט', online: 'אונליין' }, lbState.mode) +
+      chipsHtml('level', LEVELS, lbState.level) +
+      '<div id="lbl"><div class="spinner"></div></div>',
+      home
+    );
+    on('#back', home);
+    onAll('.chip', el => { lbState[el.dataset.g] = el.dataset.v; leaderboard(); });
+    const want = lbState.mode + lbState.level;
+    Net.topScores(lbState.mode, lbState.level).then(rows => {
+      if (want !== lbState.mode + lbState.level) return;
+      const box = $app.querySelector('#lbl'); if (!box) return;
+      const seen = {}, best = [];
+      rows.forEach(r => { if (!seen[r.player_id]) { seen[r.player_id] = 1; best.push(r); } });
+      if (!best.length) { box.innerHTML = '<div class="card center muted">עוד אין תוצאות כאן. תהיה הראשון! 🚀</div>'; return; }
+      const medals = ['🥇', '🥈', '🥉'];
+      box.innerHTML = '<div class="list">' + best.slice(0, 25).map((r, i) =>
+        '<div class="li' + (r.player_id === profile.pid ? ' me' : '') + (i === 0 ? ' top1' : '') + '"><span class="rank">' + (medals[i] || (i + 1)) + '</span>' +
+        '<span class="name">' + esc(r.name) + '</span><span class="tag">' + r.correct + ' נכונות</span><span class="pts">' + r.score + '</span></div>').join('') + '</div>';
+    }).catch(() => {
+      const box = $app.querySelector('#lbl');
+      if (box) box.innerHTML = '<div class="card center">📡 אין חיבור לאינטרנט<br><span class="muted">טבלת המובילים זמינה רק כשמחוברים</span></div>';
+    });
+  }
+
+  // ================= אונליין =================
+
+  const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const makeCode = () => Array.from({ length: 4 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
+  function hashCode(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36).toUpperCase(); }
+
+  function onlineMenu() {
+    if (!profile.name) return nameScreen(onlineMenu);
+    show(
+      '<div class="topbar"><button class="iconbtn" id="back">→</button><h2>👥 אונליין</h2></div>' +
+      '<button class="btn primary" id="quick"><span class="emoji">⚔️</span><span class="col">ראש בראש מהיר<span class="sub">מצא יריב אקראי ושחקו מיד</span></span></button>' +
+      '<button class="btn blue" id="create"><span class="emoji">🏠</span><span class="col">צור חדר<span class="sub">קבל קוד ושלח לחברים (עד 8 שחקנים)</span></span></button>' +
+      '<div class="card"><div class="label">יש לך קוד מחבר?</div>' +
+      '<input class="field code" id="code" maxlength="4" placeholder="קוד" autocomplete="off" autocapitalize="characters">' +
+      '<button class="btn" id="join" style="margin-top:10px">הצטרף לחדר</button></div>',
+      home
+    );
+    on('#back', home);
+    on('#quick', quickMatch);
+    on('#create', () => enterRoom(makeCode(), { creating: true }));
+    const inp = $app.querySelector('#code');
+    const join = () => {
+      const c = inp.value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+      if (c.length !== 4) { toast('הקוד צריך להיות 4 תווים'); return; }
+      enterRoom(c, { creating: false });
+    };
+    on('#join', join);
+    on(inp, e => { if (e.key === 'Enter') join(); }, 'keydown');
+  }
+
+  function connecting(text, onCancel) {
+    show('<div class="spacer"></div><div class="spinner"></div><div class="center" style="font-size:20px;font-weight:800">' + esc(text) + '</div><div class="spacer"></div>' +
+      (onCancel ? '<button class="btn" id="cancel">ביטול</button>' : ''), onCancel);
+    if (onCancel) on('#cancel', onCancel);
+  }
+
+  // ---------- ראש בראש מהיר ----------
+  function quickMatch() {
+    let handle = null, done = false;
+    const cancel = () => { done = true; if (handle) handle.leave(); onlineMenu(); };
+    connecting('מחפש יריב...', cancel);
+    const meta = { pid: profile.pid, name: profile.name, t: Date.now() };
+    Net.join('matchmaking', meta, {
+      onPresence(list) {
+        if (done) return;
+        const sorted = list.slice().sort((a, b) => (a.t - b.t) || (a.pid < b.pid ? -1 : 1));
+        const a = sorted[0], b = sorted[1];
+        if (!a || !b || (a.pid !== profile.pid && b.pid !== profile.pid)) {
+          const s = $app.querySelector('.center'); if (s) s.textContent = 'מחפש יריב... (' + list.length + ' מחפשים כרגע)';
+          return;
+        }
+        done = true;
+        const other = a.pid === profile.pid ? b : a;
+        const code = 'M' + hashCode(a.pid + '|' + b.pid);
+        setTimeout(() => { if (handle) handle.leave(); }, 300);
+        toast('נמצא יריב: ' + other.name + ' ⚔️');
+        enterRoom(code, { creating: a.pid === profile.pid, quick: true, hostPid: a.pid });
+      }
+    }).then(h => { handle = h; if (done) h.leave(); })
+      .catch(() => { if (!done) { done = true; noConnection(); } });
+  }
+
+  function noConnection() {
+    show('<div class="spacer"></div><div class="center" style="font-size:56px">📡</div>' +
+      '<div class="center" style="font-size:20px;font-weight:800">אין חיבור לשרת</div>' +
+      '<div class="center muted">בדוק שיש אינטרנט ונסה שוב</div><div class="spacer"></div>' +
+      '<button class="btn primary" id="retry">חזרה</button>', onlineMenu);
+    on('#retry', onlineMenu);
+  }
+
+  // ---------- חדר ----------
+  let room = null;
+
+  function enterRoom(code, opts) {
+    if (room) leaveRoom(true);
+    const r = room = {
+      code, opts, handle: null, players: [], phase: 'joining',
+      settings: { level: 'mixed', count: 10 },
+      qids: [], qi: -1, scores: {}, answers: {}, revealed: -1, hostTimer: null,
+      wasHost: false, gotHello: false, current: null, myAnswer: null,
+      me: { pid: profile.pid, name: profile.name, joinedAt: Date.now(), c: opts.creating ? 1 : 0 }
+    };
+    connecting(opts.quick ? 'מתחבר למשחק...' : opts.creating ? 'יוצר חדר...' : 'מצטרף לחדר ' + code + '...', () => leaveRoom());
+
+    Net.join('room-' + code, r.me, {
+      onPresence: list => { if (room === r) onPresence(r, list); },
+      onMessage: msg => { if (room === r) onMessage(r, msg); },
+      onStatus: () => { if (room === r) toast('החיבור לשרת נקטע...'); }
+    }).then(h => {
+      if (room !== r) { h.leave(); return; }
+      r.handle = h;
+      if (opts.creating) { r.phase = 'lobby'; renderLobby(r); if (opts.quick) maybeAutoStart(r); }
+      else {
+        send(r, { t: 'hello', pid: r.me.pid, name: r.me.name });
+        // מחכים לתשובה מהמארח
+        const wait = opts.quick ? 10000 : 4000;
+        setTimeout(() => {
+          if (room !== r || r.phase !== 'joining') return;
+          leaveRoom(true);
+          if (opts.quick) { toast('היריב לא התחבר, מחפש שוב...'); quickMatch(); }
+          else { modal('החדר לא נמצא', 'בדוק את הקוד ושהחבר עדיין בחדר.', [{ label: 'הבנתי', cls: 'primary' }]); }
+        }, wait);
+      }
+    }).catch(() => { if (room === r) { room = null; noConnection(); } });
+  }
+
+  function leaveRoom(silent) {
+    const r = room; room = null;
+    if (!r) return;
+    clearTimeout(r.hostTimer);
+    if (r.handle) r.handle.leave();
+    if (!silent) onlineMenu();
+  }
+
+  // המארח: יוצר החדר כל עוד הוא בחדר, אחריו מי שנכנס הכי מוקדם
+  const sortPlayers = list => list.slice().sort((a, b) => ((b.c | 0) - (a.c | 0)) || (a.joinedAt - b.joinedAt) || (a.pid < b.pid ? -1 : 1));
+  const hostPid = r => r.players.length ? r.players[0].pid : r.me.pid;
+  const amHost = r => hostPid(r) === r.me.pid;
+
+  function send(r, msg) { if (r.handle) r.handle.send(msg); }
+  function sendAll(r, msg) { send(r, msg); onMessage(r, msg); }
+
+  function onPresence(r, list) {
+    const before = r.players.map(p => p.pid);
+    r.players = sortPlayers(list);
+    if (!r.players.some(p => p.pid === r.me.pid)) r.players.push(r.me);
+    const now = r.players.map(p => p.pid);
+    // הודעות על כניסה/יציאה
+    if (r.phase !== 'joining') {
+      now.filter(p => before.indexOf(p) < 0 && p !== r.me.pid).forEach(pid => { const p = r.players.find(x => x.pid === pid); if (p) toast(p.name + ' הצטרף/ה'); });
+      before.filter(p => now.indexOf(p) < 0).forEach(pid => { const n = r.scores[pid] ? r.scores[pid].name : 'שחקן'; toast(n + ' יצא/ה'); });
+    }
+    const host = amHost(r);
+    if (host && !r.wasHost && r.phase !== 'lobby' && r.phase !== 'joining') hostTakeOver(r);
+    r.wasHost = host;
+    if (r.phase === 'lobby') { renderLobby(r); maybeAutoStart(r); }
+    if (r.phase === 'question' && host) hostCheckAll(r);
+  }
+
+  function maybeAutoStart(r) {
+    if (r.opts.quick && r.phase === 'lobby' && amHost(r) && r.players.length >= 2 && !r.autoStarted) {
+      r.autoStarted = true;
+      later(() => { if (room === r && r.players.length >= 2) hostStart(r); else r.autoStarted = false; }, 900);
+    }
+  }
+
+  function onMessage(r, m) {
+    switch (m.t) {
+      case 'hello':
+        if (amHost(r)) send(r, { t: 'settings', settings: r.settings, phase: r.phase === 'lobby' || r.phase === 'joining' ? 'lobby' : 'game' });
+        break;
+      case 'settings':
+        r.settings = m.settings;
+        if (r.phase === 'joining') {
+          if (m.phase !== 'lobby') {
+            leaveRoom(true);
+            modal('המשחק כבר התחיל', 'נסה להצטרף שוב כשהסבב הנוכחי ייגמר.', [{ label: 'הבנתי', cls: 'primary', fn: onlineMenu }]);
+            return;
+          }
+          r.phase = 'lobby'; renderLobby(r); maybeAutoStart(r);
+        } else if (m.phase === 'lobby') {
+          if (r.phase !== 'lobby') { r.phase = 'lobby'; r.autoStarted = false; }
+          renderLobby(r); maybeAutoStart(r);
+        }
+        break;
+      case 'start':
+        if (r.phase === 'joining') r.phase = 'lobby'; // הגענו בדיוק כשהמשחק התחיל - מצטרפים
+        r.qids = m.qids; r.settings = m.settings; r.qi = -1; r.revealed = -1; r.answers = {};
+        r.scores = {};
+        r.players.forEach(p => r.scores[p.pid] = { name: p.name, score: 0, correct: 0 });
+        r.phase = 'countdown';
+        renderCountdown(r);
+        if (amHost(r)) { clearTimeout(r.hostTimer); r.hostTimer = setTimeout(() => sendAll(r, { t: 'q', qi: 0 }), 3300); }
+        break;
+      case 'q':
+        if (r.phase === 'joining' || m.qi <= r.qi) return;
+        r.qi = m.qi; r.phase = 'question'; r.myAnswer = null;
+        renderOnlineQuestion(r);
+        if (amHost(r)) hostScheduleReveal(r);
+        break;
+      case 'ans': {
+        const a = r.answers[m.qi] = r.answers[m.qi] || {};
+        if (a[m.pid]) return;
+        a[m.pid] = { ok: m.ok, pts: m.pts };
+        const s = r.scores[m.pid] = r.scores[m.pid] || { name: m.name, score: 0, correct: 0 };
+        s.score += m.pts; if (m.ok) s.correct++;
+        if (m.qi === r.qi && r.phase === 'question') updateWaiting(r);
+        if (amHost(r)) hostCheckAll(r);
+        break;
+      }
+      case 'reveal':
+        if (m.qi !== r.qi || r.phase !== 'question') return;
+        r.scores = m.scores; r.phase = 'reveal';
+        renderReveal(r);
+        break;
+      case 'end':
+        if (r.phase === 'end') return;
+        r.scores = m.scores; r.phase = 'end';
+        renderOnlineResults(r);
+        break;
+    }
+  }
+
+  // ----- פעולות מארח -----
+  function hostStart(r) {
+    const ids = pickQuestions(r.settings.level, 'all', r.settings.count);
+    sendAll(r, { t: 'start', qids: ids, settings: r.settings });
+  }
+  function hostScheduleReveal(r) {
+    clearTimeout(r.hostTimer);
+    const qi = r.qi;
+    r.hostTimer = setTimeout(() => hostReveal(r, qi), Q_TIME[r.settings.level] * 1000 + 1500);
+    hostCheckAll(r);
+  }
+  function hostCheckAll(r) {
+    if (r.phase !== 'question') return;
+    const a = r.answers[r.qi] || {};
+    if (r.players.every(p => a[p.pid])) {
+      const qi = r.qi;
+      clearTimeout(r.hostTimer);
+      r.hostTimer = setTimeout(() => hostReveal(r, qi), 700);
+    }
+  }
+  function hostReveal(r, qi) {
+    if (room !== r || r.revealed >= qi || r.qi !== qi) return;
+    r.revealed = qi;
+    sendAll(r, { t: 'reveal', qi, scores: r.scores });
+    clearTimeout(r.hostTimer);
+    r.hostTimer = setTimeout(() => {
+      if (room !== r) return;
+      if (qi + 1 < r.qids.length) sendAll(r, { t: 'q', qi: qi + 1 });
+      else sendAll(r, { t: 'end', scores: r.scores });
+    }, 3500);
+  }
+  function hostTakeOver(r) {
+    // המארח הקודם יצא - ממשיכים מאיפה שהוא עצר
+    toast('אתה המארח עכשיו 👑');
+    if (r.phase === 'countdown') { clearTimeout(r.hostTimer); r.hostTimer = setTimeout(() => sendAll(r, { t: 'q', qi: 0 }), 2000); }
+    else if (r.phase === 'question') hostScheduleReveal(r);
+    else if (r.phase === 'reveal') { r.revealed = r.qi - 1; hostReveal(r, r.qi); }
+    if (r.phase === 'lobby') renderLobby(r);
+  }
+
+  // ----- תצוגות אונליין -----
+  function shareCode(code) {
+    const text = 'בוא לשחק איתי טריוויה בזק ⚡ קוד החדר: ' + code;
+    try {
+      if (window.Android && Android.share) { Android.share(text); return; }
+      if (navigator.share) { navigator.share({ text }).catch(() => {}); return; }
+      navigator.clipboard.writeText(text).then(() => toast('הועתק! הדבק לחברים'), () => toast('הקוד: ' + code));
+    } catch (e) { toast('הקוד: ' + code); }
+  }
+
+  function renderLobby(r) {
+    const host = amHost(r);
+    const hp = hostPid(r);
+    const players = r.players.length ? r.players : [r.me];
+    const confirmLeave = () => modal('לצאת מהחדר?', '', [{ label: 'להישאר', cls: 'primary' }, { label: 'לצאת', fn: () => leaveRoom() }]);
+    show(
+      '<div class="topbar"><button class="iconbtn" id="back">→</button><h2>' + (r.opts.quick ? '⚔️ ראש בראש' : '🏠 חדר משחק') + '</h2></div>' +
+      (r.opts.quick ? '<div class="center muted">המשחק מתחיל אוטומטית...</div>' :
+        '<div class="card center"><div class="label">קוד החדר</div><div class="roomcode">' + esc(r.code) + '</div>' +
+        '<button class="btn small blue" id="share">📤 שלח לחברים</button></div>') +
+      '<div class="card"><div class="label">שחקנים (' + players.length + '/8)</div><div class="list">' +
+      players.map(p => '<div class="li' + (p.pid === r.me.pid ? ' me' : '') + '"><span class="rank">' + (p.pid === hp ? '👑' : '🙂') + '</span><span class="name">' + esc(p.name) + '</span>' +
+        (p.pid === r.me.pid ? '<span class="tag">את/ה</span>' : '') + '</div>').join('') + '</div></div>' +
+      '<div class="card"><div class="label">הגדרות' + (host ? '' : ' (המארח קובע)') + '</div>' +
+      (host ? chipsHtml('level', LEVELS, r.settings.level) + '<div style="height:8px"></div>' + chipsHtml('count', { 10: '10 שאלות', 15: '15 שאלות' }, String(r.settings.count))
+        : '<div>רמה: <b>' + esc(LEVELS[r.settings.level]) + '</b> · <b>' + r.settings.count + '</b> שאלות</div>') + '</div>' +
+      '<div class="spacer"></div>' +
+      (host && !r.opts.quick
+        ? '<button class="btn primary" id="start"' + (players.length < 2 ? ' disabled' : '') + '>' + (players.length < 2 ? 'ממתין לשחקנים נוספים...' : 'התחל משחק ▶') + '</button>'
+        : (!r.opts.quick ? '<div class="center muted">⏳ ממתין שהמארח יתחיל את המשחק</div>' : '')),
+      confirmLeave
+    );
+    on('#back', confirmLeave);
+    on('#share', () => shareCode(r.code));
+    if (host) {
+      onAll('.chip', el => {
+        if (el.dataset.g === 'level') r.settings.level = el.dataset.v; else r.settings.count = +el.dataset.v;
+        sendAll(r, { t: 'settings', settings: r.settings, phase: 'lobby' });
+      });
+      on('#start', () => { if (r.players.length >= 2 && room === r) hostStart(r); });
+    }
+  }
+
+  function renderCountdown(r) {
+    const quitGame = () => confirmQuit(() => leaveRoom());
+    show('<div class="center muted" style="margin-top:30px">' + esc(LEVELS[r.settings.level]) + ' · ' + r.qids.length + ' שאלות · ' + r.players.length + ' שחקנים</div>' +
+      '<div class="countdown" id="cd">3</div><div class="center" style="font-weight:800;font-size:20px">התכוננו!</div><div class="spacer"></div>', quitGame);
+    let n = 3;
+    const tick = () => { n--; const el = $app.querySelector('#cd'); if (el && n > 0) { el.textContent = n; el.style.animation = 'none'; void el.offsetWidth; el.style.animation = ''; sfx.tick(); later(tick, 1000); } };
+    sfx.tick(); later(tick, 1000);
+  }
+
+  function scoreList(r, qi) {
+    const ranked = Object.keys(r.scores).map(pid => Object.assign({ pid }, r.scores[pid])).sort((a, b) => b.score - a.score);
+    const a = qi != null ? (r.answers[qi] || {}) : null;
+    return '<div class="list">' + ranked.map((p, i) =>
+      '<div class="li' + (p.pid === r.me.pid ? ' me' : '') + '"><span class="rank">' + (i + 1) + '</span><span class="name">' + esc(p.name) + '</span>' +
+      (a ? (a[p.pid] && a[p.pid].ok ? '<span class="tick">✓ +' + a[p.pid].pts + '</span>' : '<span class="cross">✗</span>') : '') +
+      '<span class="pts">' + p.score + '</span></div>').join('') + '</div>';
+  }
+
+  function renderOnlineQuestion(r) {
+    const id = r.qids[r.qi];
+    const T = Q_TIME[r.settings.level];
+    const qh = questionHtml(id, r.qi + 1, r.qids.length);
+    const my = r.scores[r.me.pid] || { score: 0 };
+    const quitGame = () => confirmQuit(() => leaveRoom());
+    show(
+      '<div class="hud"><button class="iconbtn" id="quit">✕</button><span class="pill score">⭐ ' + my.score + '</span>' +
+      '<span class="pill">' + (r.qi + 1) + '/' + r.qids.length + '</span><span class="spacer"></span><span class="bigtime" id="tl"></span></div>' +
+      '<div class="timer" id="tb"><div></div></div>' + qh.html +
+      '<div class="flash muted" id="wait"></div><div id="board"></div>',
+      quitGame
+    );
+    on('#quit', quitGame);
+    const qStart = performance.now();
+    const timer = runTimer('#tb', '#tl', T, () => answer(null));
+    $app.querySelectorAll('.answer').forEach(b => b.addEventListener('click', () => answer(b)));
+    function answer(btn) {
+      if (r.myAnswer) return;
+      timer.stop();
+      const ok = !!btn && btn.dataset.o === '0';
+      const rem = Math.max(0, T - (performance.now() - qStart) / 1000);
+      const pts = ok ? 100 + Math.round(100 * rem / T) : 0;
+      r.myAnswer = { o: btn ? btn.dataset.o : null };
+      $app.querySelectorAll('.answer').forEach(b => { if (b === btn) b.classList.add('picked'); else b.classList.add('dim'); });
+      if (!btn) sfx.bad();
+      sendAll(r, { t: 'ans', qi: r.qi, pid: r.me.pid, name: r.me.name, ok, pts });
+      updateWaiting(r);
+    }
+    r.stopTimer = () => timer.stop();
+  }
+
+  function updateWaiting(r) {
+    const w = $app.querySelector('#wait'); if (!w || !r.myAnswer) return;
+    const a = r.answers[r.qi] || {};
+    const left = r.players.filter(p => !a[p.pid]).length;
+    w.textContent = left ? '⏳ ממתין ל-' + left + ' שחקנים...' : '✓ כולם ענו!';
+  }
+
+  function renderReveal(r) {
+    if (r.stopTimer) r.stopTimer();
+    const mine = (r.answers[r.qi] || {})[r.me.pid];
+    $app.querySelectorAll('.answer').forEach(b => {
+      b.classList.remove('dim');
+      if (b.dataset.o === '0') b.classList.add('correct');
+      else if (r.myAnswer && b.dataset.o === r.myAnswer.o) b.classList.add('wrong');
+      else b.classList.add('dim');
+    });
+    const w = $app.querySelector('#wait');
+    if (w) {
+      if (mine && mine.ok) { w.className = 'flash good'; w.textContent = 'נכון! +' + mine.pts; sfx.good(); }
+      else { w.className = 'flash bad'; w.textContent = r.myAnswer && r.myAnswer.o != null ? 'טעות!' : 'לא הספקת לענות'; if (r.myAnswer && r.myAnswer.o != null) sfx.bad(); }
+    }
+    const sc = $app.querySelector('.hud .score'); if (sc && r.scores[r.me.pid]) sc.textContent = '⭐ ' + r.scores[r.me.pid].score;
+    const b = $app.querySelector('#board'); if (b) b.innerHTML = scoreList(r, r.qi);
+  }
+
+  function renderOnlineResults(r) {
+    sfx.end();
+    const ranked = Object.keys(r.scores).map(pid => Object.assign({ pid }, r.scores[pid])).sort((a, b) => b.score - a.score);
+    const myRank = ranked.findIndex(p => p.pid === r.me.pid) + 1;
+    const me = r.scores[r.me.pid] || { score: 0, correct: 0 };
+    const tie = ranked.length > 1 && ranked[0].score === ranked[1].score;
+    const won = myRank === 1 && !tie;
+    const head = ranked.length < 2 ? 'סיום!' : won ? '🏆 ניצחת!' : (tie && ranked[0].score === me.score) ? '🤝 תיקו!' : 'מקום ' + myRank;
+    const host = amHost(r);
+    show(
+      '<div class="center" style="font-size:34px;font-weight:900;margin-top:16px">' + head + '</div>' +
+      '<div class="bigscore">' + me.score + '</div>' +
+      '<div class="center muted">' + me.correct + ' תשובות נכונות מתוך ' + r.qids.length + '</div>' +
+      '<div class="card"><div class="label">התוצאות</div>' + scoreList(r, null) + '</div>' +
+      '<div class="center muted" id="sub">שומר בטבלת המובילים...</div>' +
+      '<div class="spacer"></div>' +
+      (host ? '<button class="btn primary" id="again">משחק נוסף 🔁</button>' : '<div class="center muted">המארח יכול להתחיל משחק נוסף</div>') +
+      '<button class="btn small" id="leave">יציאה</button>',
+      () => leaveRoom()
+    );
+    if (won) vibrate(300);
+    on('#leave', () => leaveRoom());
+    on('#again', () => { r.autoStarted = false; sendAll(r, { t: 'settings', settings: r.settings, phase: 'lobby' }); });
+    if (me.score > 0) {
+      Net.submitScore({ player_id: profile.pid, name: profile.name, mode: 'online', level: r.settings.level, score: Math.min(me.score, 5000), correct: Math.min(me.correct, 100) })
+        .then(() => { const s = $app.querySelector('#sub'); if (s) s.textContent = '✓ נשמר בטבלת המובילים'; })
+        .catch(() => { const s = $app.querySelector('#sub'); if (s) s.textContent = ''; });
+    } else { const s = $app.querySelector('#sub'); if (s) s.textContent = ''; }
+  }
+
+  home();
+})();
