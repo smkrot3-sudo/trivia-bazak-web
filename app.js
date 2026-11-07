@@ -98,12 +98,14 @@
   }, true);
 
   // ---------- בחירת שאלות ----------
+  // cat יכול להיות: undefined/'all' (הכול), קוד נושא בודד, או מערך קודי נושאים
   function poolFor(level, cat) {
+    const cats = Array.isArray(cat) ? cat : (cat && cat !== 'all' ? [cat] : null);
     const out = [];
     for (let i = 0; i < Q.length; i++) {
       const q = Q[i];
       if (level !== 'mixed' && q[1] !== LEVEL_DIFF[level]) continue;
-      if (cat && cat !== 'all' && q[0] !== cat) continue;
+      if (cats && cats.indexOf(q[0]) < 0) continue;
       out.push(i);
     }
     return out;
@@ -172,12 +174,14 @@
       '<div class="logo"><span class="bolt">⚡</span><h1>טריוויה <span>בזק</span></h1><p>' + Q.length + ' שאלות ב-' + Object.keys(CATS).length + ' נושאים</p></div>' +
       '<div class="card center">שלום, <b>' + esc(profile.name) + '</b> 👋 <a href="#" id="rename" class="muted" style="font-size:14px">שינוי שם</a></div>' +
       '<button class="btn primary" id="solo"><span class="emoji">⏱️</span><span class="col">משחק יחיד<span class="sub">נגד השעון, ברמה שתבחר</span></span></button>' +
+      '<button class="btn" id="campaign" style="background:linear-gradient(135deg,#ffb23f,#ff7a3f);border-color:transparent"><span class="emoji">🗺️</span><span class="col">קמפיין<span class="sub">התקדמו שלב אחר שלב, ' + CAMPAIGN_TOTAL + ' שלבים</span></span></button>' +
       '<button class="btn blue" id="online"><span class="emoji">👥</span><span class="col">אונליין עם חברים<span class="sub">ראש בראש או חדר עם קוד</span></span></button>' +
       '<button class="btn" id="lb"><span class="emoji">🏆</span><span class="col">טבלת מובילים<span class="sub">השיאים של כל השחקנים</span></span></button>' +
       '<div class="spacer"></div>' +
       '<button class="btn ghost small" id="sound">' + (profile.sound ? '🔊 צלילים ורטט: פועל' : '🔇 צלילים ורטט: כבוי') + '</button>'
     );
     on('#solo', soloSetup);
+    on('#campaign', campaignMap);
     on('#online', onlineMenu);
     on('#lb', () => leaderboard());
     on('#rename', e => { e.preventDefault(); nameScreen(home); });
@@ -208,6 +212,12 @@
   function chipsHtml(group, items, current) {
     return '<div class="chips">' + Object.keys(items).map(k =>
       '<button class="chip' + (k === current ? ' on' : '') + '" data-g="' + group + '" data-v="' + k + '">' + esc(items[k]) + '</button>').join('') + '</div>';
+  }
+  // בחירה מרובה (לדוגמה: כמה נושאים ספציפיים לחדר אונליין)
+  function multiChipsHtml(group, items, selected) {
+    const sel = new Set(selected || []);
+    return '<div class="chips">' + Object.keys(items).map(k =>
+      '<button class="chip' + (sel.has(k) ? ' on' : '') + '" data-g="' + group + '" data-v="' + k + '">' + esc(items[k]) + '</button>').join('') + '</div>';
   }
 
   function soloSetup() {
@@ -240,9 +250,72 @@
     ]);
   }
 
+  // לולאת משחק משותפת: N שאלות קבועות, טיימר לכל שאלה - משמשת גם למשחק קלאסי וגם לקמפיין
+  function runQuizSession(ids, opts, onFinish) {
+    const T = Q_TIME[opts.level];
+    const st = { i: 0, score: 0, correct: 0, streak: 0, bestStreak: 0, answered: 0 };
+    const quit = opts.onQuit || (() => confirmQuit(() => { clearTimers(); (opts.onQuitBack || home)(); }));
+
+    function render() {
+      if (st.i >= ids.length) { clearTimers(); onFinish({ score: st.score, correct: st.correct, total: ids.length, bestStreak: st.bestStreak }); return; }
+      const id = ids[st.i];
+      const qh = questionHtml(id, st.i + 1, ids.length);
+      const hud =
+        '<div class="hud"><button class="iconbtn" id="quit">✕</button>' +
+        '<span class="pill score">⭐ ' + st.score + '</span>' +
+        '<span class="pill">' + (st.i + 1) + '/' + ids.length + '</span>' +
+        '<span class="spacer"></span><span class="bigtime" id="tl"></span></div>' +
+        '<div class="timer" id="tb"><div></div></div>';
+      $app.innerHTML = '<div class="screen">' + hud + '<div id="qarea" style="display:flex;flex-direction:column;gap:14px">' + qh.html + '<div class="flash" id="flash"></div></div></div>';
+      backHandler = quit;
+      on('#quit', quit);
+      let locked = false;
+      const qStart = performance.now();
+      const qTimer = runTimer('#tb', '#tl', T, () => answer(null));
+      $app.querySelectorAll('.answer').forEach(b => b.addEventListener('click', () => answer(b)));
+
+      function answer(btn) {
+        if (locked) return; locked = true;
+        qTimer.stop();
+        const ok = btn && btn.dataset.o === '0';
+        const flash = $app.querySelector('#flash');
+        $app.querySelectorAll('.answer').forEach(b => {
+          if (b.dataset.o === '0') b.classList.add('correct');
+          else if (b === btn) b.classList.add('wrong');
+          else b.classList.add('dim');
+        });
+        st.answered++;
+        if (ok) {
+          st.correct++; st.streak++; st.bestStreak = Math.max(st.bestStreak, st.streak);
+          const rem = Math.max(0, T - (performance.now() - qStart) / 1000);
+          const pts = 100 + Math.round(100 * rem / T);
+          st.score += pts;
+          flash.className = 'flash good'; flash.textContent = '+' + pts + (st.streak >= 3 ? '  🔥 רצף ' + st.streak : '');
+          sfx.good();
+        } else {
+          st.streak = 0;
+          flash.textContent = btn ? 'טעות!' : 'נגמר הזמן!';
+          flash.className = 'flash bad';
+          sfx.bad();
+        }
+        st.i++;
+        later(render, 1300);
+      }
+    }
+    render();
+  }
+
   function soloGame(cfg) {
     const sprint = cfg.mode === 'sprint';
-    const ids = pickQuestions(cfg.level, cfg.cat, sprint ? 999 : 10);
+    if (!sprint) {
+      const ids = pickQuestions(cfg.level, cfg.cat, 10);
+      if (!ids.length) { toast('אין שאלות לבחירה הזו'); return soloSetup(); }
+      runQuizSession(ids, { level: cfg.level, onQuitBack: soloSetup }, summary =>
+        soloResults(cfg, { score: summary.score, correct: summary.correct, answered: summary.total, bestStreak: summary.bestStreak }));
+      return;
+    }
+    // ---------- ספרינט: טיימר רציף של 60 שניות, כמה שיותר שאלות ----------
+    const ids = pickQuestions(cfg.level, cfg.cat, 999);
     if (!ids.length) { toast('אין שאלות לבחירה הזו'); return soloSetup(); }
     const st = { i: 0, score: 0, correct: 0, streak: 0, bestStreak: 0, penalty: 0, answered: 0 };
     const T = Q_TIME[cfg.level];
@@ -257,14 +330,14 @@
     function render() {
       if (st.i >= ids.length) return finish();
       const id = ids[st.i];
-      const qh = questionHtml(id, st.i + 1, sprint ? 0 : ids.length);
+      const qh = questionHtml(id, st.i + 1, 0);
       const hud =
         '<div class="hud"><button class="iconbtn" id="quit">✕</button>' +
         '<span class="pill score">⭐ ' + st.score + '</span>' +
-        (sprint ? '<span class="pill">✔ ' + st.correct + '</span>' + (st.streak >= 2 ? '<span class="pill">🔥 ' + st.streak + '</span>' : '') : '<span class="pill">' + (st.i + 1) + '/' + ids.length + '</span>') +
+        '<span class="pill">✔ ' + st.correct + '</span>' + (st.streak >= 2 ? '<span class="pill">🔥 ' + st.streak + '</span>' : '') +
         '<span class="spacer"></span><span class="bigtime" id="tl"></span></div>' +
         '<div class="timer" id="tb"><div></div></div>';
-      if (sprint && sprintTimer) {
+      if (sprintTimer) {
         // ספרינט: הטיימר ממשיך לרוץ, מחליפים רק את השאלה
         $app.querySelector('#qarea').innerHTML = qh.html + '<div class="flash" id="flash"></div>';
         const pills = $app.querySelector('.hud');
@@ -279,18 +352,12 @@
         on('#quit', quit);
       }
       let locked = false;
-      let qTimer = null;
       const qStart = performance.now();
-      if (sprint) {
-        if (!sprintTimer) sprintTimer = runTimer('#tb', '#tl', 60, finish, () => -st.penalty);
-      } else {
-        qTimer = runTimer('#tb', '#tl', T, () => answer(null));
-      }
+      if (!sprintTimer) sprintTimer = runTimer('#tb', '#tl', 60, finish, () => -st.penalty);
       $app.querySelectorAll('.answer').forEach(b => b.addEventListener('click', () => answer(b)));
 
       function answer(btn) {
         if (locked) return; locked = true;
-        if (qTimer) qTimer.stop();
         const ok = btn && btn.dataset.o === '0';
         const flash = $app.querySelector('#flash');
         $app.querySelectorAll('.answer').forEach(b => {
@@ -301,24 +368,18 @@
         st.answered++;
         if (ok) {
           st.correct++; st.streak++; st.bestStreak = Math.max(st.bestStreak, st.streak);
-          let pts;
-          if (sprint) pts = 100 + Math.min(st.streak - 1, 5) * 20;
-          else {
-            const rem = Math.max(0, T - (performance.now() - qStart) / 1000);
-            pts = 100 + Math.round(100 * rem / T);
-          }
+          const pts = 100 + Math.min(st.streak - 1, 5) * 20;
           st.score += pts;
           flash.className = 'flash good'; flash.textContent = '+' + pts + (st.streak >= 3 ? '  🔥 רצף ' + st.streak : '');
           sfx.good();
         } else {
           st.streak = 0;
-          if (sprint) { st.penalty += 3; flash.textContent = '−3 שניות'; }
-          else flash.textContent = btn ? 'טעות!' : 'נגמר הזמן!';
+          st.penalty += 3; flash.textContent = '−3 שניות';
           flash.className = 'flash bad';
           sfx.bad();
         }
         st.i++;
-        later(render, sprint ? (ok ? 450 : 900) : 1300);
+        later(render, ok ? 450 : 900);
       }
     }
     render();
@@ -355,6 +416,88 @@
         .then(() => { const s = $app.querySelector('#sub'); if (s) s.textContent = '✓ נשמר בטבלת המובילים'; })
         .catch(() => { const s = $app.querySelector('#sub'); if (s) s.textContent = 'לא נשמר בטבלה (אין חיבור לאינטרנט)'; });
     }
+  }
+
+  // ---------- קמפיין ----------
+  const CAMPAIGN_TOTAL = 30;
+  const CAMPAIGN_QPS = 8;
+  function campaignLevel(n) {
+    if (n <= 8) return 'easy';
+    if (n <= 16) return 'medium';
+    if (n <= 24) return 'hard';
+    return 'mixed';
+  }
+  // כל שלב חמישי הוא שלב "נושא" הממוקד בנושא אחד בלבד, במחזוריות על פני כל הנושאים
+  function campaignThemeCat(n) {
+    if (n % 5 !== 0) return null;
+    const cats = Object.keys(CATS);
+    return cats[(Math.floor(n / 5) - 1) % cats.length];
+  }
+  function campaignProgress() { return store.get('campaign', { unlocked: 1, stars: {} }); }
+  function saveCampaignProgress(p) { store.set('campaign', p); }
+
+  function campaignMap() {
+    const p = campaignProgress();
+    const tiles = [];
+    for (let n = 1; n <= CAMPAIGN_TOTAL; n++) {
+      const locked = n > p.unlocked;
+      const stars = p.stars[n] || 0;
+      const theme = campaignThemeCat(n);
+      const cls = 'stage' + (locked ? ' locked' : '') + (stars ? ' done' : '');
+      tiles.push(
+        '<button class="' + cls + '" data-n="' + n + '"' + (locked ? ' disabled' : '') + '>' +
+        '<span class="stageicon">' + (locked ? '🔒' : (theme ? CATS[theme].icon : n)) + '</span>' +
+        '<span class="stagenum">שלב ' + n + '</span>' +
+        (stars ? '<span class="stagestars">' + '★'.repeat(stars) + '☆'.repeat(3 - stars) + '</span>' : (theme && !locked ? '<span class="stagestars muted">' + esc(CATS[theme].name) + '</span>' : '')) +
+        '</button>'
+      );
+    }
+    show(
+      '<div class="topbar"><button class="iconbtn" id="back">→</button><h2>🗺️ קמפיין</h2></div>' +
+      '<div class="muted center">' + CAMPAIGN_TOTAL + ' שלבים · כל 5 שלבים - נושא מיוחד · צריך 60% ומעלה כדי לעבור</div>' +
+      '<div class="stagegrid">' + tiles.join('') + '</div>',
+      home
+    );
+    on('#back', home);
+    onAll('.stage:not([disabled])', el => campaignPlay(+el.dataset.n));
+  }
+
+  function campaignPlay(n) {
+    const level = campaignLevel(n);
+    const theme = campaignThemeCat(n);
+    const ids = pickQuestions(level, theme || 'all', CAMPAIGN_QPS);
+    if (!ids.length) { toast('אין מספיק שאלות לשלב הזה'); return campaignMap(); }
+    runQuizSession(ids, { level, onQuit: () => confirmQuit(() => { clearTimers(); campaignMap(); }) },
+      summary => campaignResults(n, summary));
+  }
+
+  function campaignResults(n, summary) {
+    sfx.end();
+    const pct = summary.total ? Math.round(100 * summary.correct / summary.total) : 0;
+    const passed = pct >= 60;
+    const stars = !passed ? 0 : (pct >= 100 ? 3 : pct >= 80 ? 2 : 1);
+    const p = campaignProgress();
+    if (passed) {
+      p.stars[n] = Math.max(p.stars[n] || 0, stars);
+      if (n === p.unlocked && n < CAMPAIGN_TOTAL) p.unlocked = n + 1;
+      saveCampaignProgress(p);
+    }
+    const isLast = n === CAMPAIGN_TOTAL && passed;
+    const head = isLast ? 'ניצחת את הקמפיין! 🏆' : !passed ? 'לא עבר השלב הפעם 😕' : 'שלב ' + n + ' הושלם! 🎉';
+    show(
+      '<div class="center" style="font-size:30px;font-weight:900;margin-top:16px">' + head + '</div>' +
+      (passed ? '<div class="center" style="font-size:40px">' + '★'.repeat(stars) + '☆'.repeat(3 - stars) + '</div>' : '') +
+      '<div class="stats"><div class="stat"><b>' + summary.correct + '/' + summary.total + '</b><span>נכונות</span></div>' +
+      '<div class="stat"><b>' + pct + '%</b><span>דיוק</span></div>' +
+      '<div class="stat"><b>' + summary.score + '</b><span>ניקוד</span></div></div>' +
+      '<div class="spacer"></div>' +
+      (passed && !isLast ? '<button class="btn primary" id="next">השלב הבא ▶</button>' : '') +
+      '<div class="row"><button class="btn small" id="retry">נסה שוב 🔁</button><button class="btn small" id="map">🗺️ מפה</button></div>',
+      campaignMap
+    );
+    if (passed && !isLast) on('#next', () => campaignPlay(n + 1));
+    on('#retry', () => campaignPlay(n));
+    on('#map', campaignMap);
   }
 
   // ---------- טבלת מובילים ----------
@@ -465,7 +608,7 @@
     if (room) leaveRoom(true);
     const r = room = {
       code, opts, handle: null, players: [], phase: 'joining',
-      settings: { level: 'mixed', count: 10 },
+      settings: { level: 'mixed', count: 10, cats: 'all' },
       qids: [], qi: -1, scores: {}, answers: {}, revealed: -1, hostTimer: null,
       wasHost: false, gotHello: false, current: null, myAnswer: null,
       me: { pid: profile.pid, name: profile.name, joinedAt: Date.now(), c: opts.creating ? 1 : 0 }
@@ -593,7 +736,8 @@
 
   // ----- פעולות מארח -----
   function hostStart(r) {
-    const ids = pickQuestions(r.settings.level, 'all', r.settings.count);
+    const ids = pickQuestions(r.settings.level, r.settings.cats || 'all', r.settings.count);
+    if (!ids.length) { toast('אין מספיק שאלות לנושאים שנבחרו'); return; }
     sendAll(r, { t: 'start', qids: ids, settings: r.settings });
   }
   function hostScheduleReveal(r) {
@@ -657,6 +801,11 @@
       '<div class="card"><div class="label">הגדרות' + (host ? '' : ' (המארח קובע)') + '</div>' +
       (host ? chipsHtml('level', LEVELS, r.settings.level) + '<div style="height:8px"></div>' + chipsHtml('count', { 10: '10 שאלות', 15: '15 שאלות' }, String(r.settings.count))
         : '<div>רמה: <b>' + esc(LEVELS[r.settings.level]) + '</b> · <b>' + r.settings.count + '</b> שאלות</div>') + '</div>' +
+      (!r.opts.quick ?
+        '<div class="card"><div class="label">נושאים' + (host ? ' (אפשר לבחור כמה)' : '') + '</div>' +
+        (host ? multiChipsHtml('cats', topicChipItems(), r.settings.cats === 'all' ? ['all'] : r.settings.cats)
+          : '<div>' + (r.settings.cats === 'all' ? 'כל הנושאים' : (r.settings.cats || []).map(c => CATS[c] ? esc(CATS[c].name) : c).join(', ')) + '</div>') + '</div>'
+        : '') +
       '<div class="spacer"></div>' +
       (host && !r.opts.quick
         ? '<button class="btn primary" id="start"' + (players.length < 2 ? ' disabled' : '') + '>' + (players.length < 2 ? 'ממתין לשחקנים נוספים...' : 'התחל משחק ▶') + '</button>'
@@ -667,11 +816,27 @@
     on('#share', () => shareCode(r.code));
     if (host) {
       onAll('.chip', el => {
-        if (el.dataset.g === 'level') r.settings.level = el.dataset.v; else r.settings.count = +el.dataset.v;
+        const g = el.dataset.g, v = el.dataset.v;
+        if (g === 'level') r.settings.level = v;
+        else if (g === 'count') r.settings.count = +v;
+        else if (g === 'cats') {
+          if (v === 'all') { r.settings.cats = 'all'; }
+          else {
+            const arr = r.settings.cats === 'all' ? [] : r.settings.cats.slice();
+            const idx = arr.indexOf(v);
+            if (idx >= 0) arr.splice(idx, 1); else arr.push(v);
+            r.settings.cats = arr.length ? arr : 'all';
+          }
+        }
         sendAll(r, { t: 'settings', settings: r.settings, phase: 'lobby' });
       });
       on('#start', () => { if (r.players.length >= 2 && room === r) hostStart(r); });
     }
+  }
+  function topicChipItems() {
+    const items = { all: '🎲 הכול' };
+    Object.keys(CATS).forEach(k => items[k] = CATS[k].icon + ' ' + CATS[k].name);
+    return items;
   }
 
   function renderCountdown(r) {

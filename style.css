@@ -156,3 +156,18 @@ input.code { text-align: center; letter-spacing: 10px; font-size: 30px; font-wei
 .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: grid; place-items: center; padding: 20px; z-index: 5; animation: fadeIn .15s; }
 .modal { background: var(--bg2); border: 1px solid var(--line); border-radius: 22px; padding: 20px; width: 100%; max-width: 400px; display: flex; flex-direction: column; gap: 12px; }
 .modal h3 { font-size: 20px; }
+
+/* ===== Campaign ===== */
+.stagegrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.stage {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  aspect-ratio: 1; padding: 8px 4px; border-radius: 16px;
+  background: var(--card); border: 2px solid var(--line); color: var(--text); font: inherit;
+}
+.stage .stageicon { font-size: 22px; font-weight: 900; }
+.stage .stagenum { font-size: 11px; font-weight: 700; color: var(--muted); }
+.stage .stagestars { font-size: 11px; color: var(--accent); letter-spacing: 1px; }
+.stage .stagestars.muted { color: var(--muted); letter-spacing: 0; font-size: 10px; }
+.stage.done { border-color: var(--accent); background: rgba(255,210,63,.12); }
+.stage.locked { opacity: .4; }
+.stage:active:not(.locked) { transform: scale(.95); }
