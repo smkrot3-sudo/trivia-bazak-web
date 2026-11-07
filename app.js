@@ -25,6 +25,23 @@
   const MODES = { classic: 'קלאסי', sprint: 'ספרינט 60 שניות', online: 'אונליין' };
   const KEYS = ['א', 'ב', 'ג', 'ד'];
 
+  // ---------- מיתוג ----------
+  const BRAND = 'ידעתי';
+  const BRAND_ICON =
+    '<svg class="brand-icon" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
+    '<defs><radialGradient id="bgrad" cx="32%" cy="26%" r="80%">' +
+    '<stop offset="0%" stop-color="#ffe9ab"/><stop offset="55%" stop-color="#ffc845"/><stop offset="100%" stop-color="#e3a515"/>' +
+    '</radialGradient></defs>' +
+    '<circle cx="50" cy="50" r="48" fill="url(#bgrad)"/>' +
+    '<path d="M58 16 L28 56 H46 L41 88 L76 42 H56 L58 16 Z" fill="#2b1800"/>' +
+    '</svg>';
+  function brandmark(withSub) {
+    return '<div class="brandmark"><div class="brand-lockup">' + BRAND_ICON +
+      '<h1 class="brand-word">' + BRAND + '</h1></div>' +
+      (withSub ? '<p class="brand-sub">' + Q.length + ' שאלות · ' + Object.keys(CATS).length + ' נושאים</p>' : '') +
+      '</div>';
+  }
+
   let timers = [];
   let backHandler = null;
   const later = (fn, ms) => { const t = setTimeout(fn, ms); timers.push(t); return t; };
@@ -171,12 +188,12 @@
   function home() {
     if (!profile.name) return nameScreen(home);
     show(
-      '<div class="logo"><span class="bolt">⚡</span><h1>טריוויה <span>בזק</span></h1><p>' + Q.length + ' שאלות ב-' + Object.keys(CATS).length + ' נושאים</p></div>' +
+      brandmark(true) +
       '<div class="card center">שלום, <b>' + esc(profile.name) + '</b> 👋 <a href="#" id="rename" class="muted" style="font-size:14px">שינוי שם</a></div>' +
       '<button class="btn primary" id="solo"><span class="emoji">⏱️</span><span class="col">משחק יחיד<span class="sub">נגד השעון, ברמה שתבחר</span></span></button>' +
-      '<button class="btn" id="campaign" style="background:linear-gradient(135deg,#ffb23f,#ff7a3f);border-color:transparent"><span class="emoji">🗺️</span><span class="col">קמפיין<span class="sub">התקדמו שלב אחר שלב, ' + CAMPAIGN_TOTAL + ' שלבים</span></span></button>' +
-      '<button class="btn blue" id="online"><span class="emoji">👥</span><span class="col">אונליין עם חברים<span class="sub">ראש בראש או חדר עם קוד</span></span></button>' +
-      '<button class="btn" id="lb"><span class="emoji">🏆</span><span class="col">טבלת מובילים<span class="sub">השיאים של כל השחקנים</span></span></button>' +
+      '<button class="btn secondary" id="campaign" style="--stripe:var(--accent)"><span class="emoji">🗺️</span><span class="col">קמפיין<span class="sub">התקדמו שלב אחר שלב, ' + CAMPAIGN_TOTAL + ' שלבים</span></span></button>' +
+      '<button class="btn secondary" id="online" style="--stripe:var(--accent2-b)"><span class="emoji">👥</span><span class="col">אונליין עם חברים<span class="sub">ראש בראש או חדר עם קוד</span></span></button>' +
+      '<button class="btn ghost" id="lb"><span class="emoji">🏆</span><span class="col">טבלת מובילים<span class="sub">השיאים של כל השחקנים</span></span></button>' +
       '<div class="spacer"></div>' +
       '<button class="btn ghost small" id="sound">' + (profile.sound ? '🔊 צלילים ורטט: פועל' : '🔇 צלילים ורטט: כבוי') + '</button>'
     );
@@ -190,7 +207,7 @@
 
   function nameScreen(next) {
     show(
-      '<div class="logo"><span class="bolt">⚡</span><h1>טריוויה <span>בזק</span></h1></div>' +
+      brandmark(false) +
       '<div class="card"><div class="label">איך לקרוא לך? (יופיע לחברים ובטבלת המובילים)</div>' +
       '<input class="field" id="name" maxlength="16" placeholder="הכינוי שלך" value="' + esc(profile.name || '') + '"></div>' +
       '<button class="btn primary" id="ok">יאללה!</button>',
@@ -777,7 +794,7 @@
 
   // ----- תצוגות אונליין -----
   function shareCode(code) {
-    const text = 'בוא לשחק איתי טריוויה בזק ⚡ קוד החדר: ' + code;
+    const text = 'בוא לשחק איתי ב-' + BRAND + ' ⚡ קוד החדר: ' + code;
     try {
       if (window.Android && Android.share) { Android.share(text); return; }
       if (navigator.share) { navigator.share({ text }).catch(() => {}); return; }
