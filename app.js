@@ -46,6 +46,9 @@
   const aeRandLetter = () => AE_LETTERS[Math.floor(Math.random() * AE_LETTERS.length)];
   const aeRandCats = () => shuffle(AE_CATS).slice(0, 6).map(c => c.code);
   const aeNorm = s => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  // בדיקה סטרוקטורלית בסיסית (לא מילונית - אין מילון עברי זמין): תשובה חייבת להתחיל
+  // באות הנכונה ולהיות באורך שתווים לפחות, אחרת אין דרך לסמן אותה "תקינה" בכלל.
+  const aeIsStructOk = (a, letter) => { const t = String(a || '').trim(); return t.length >= 2 && t[0] === letter; };
 
   // ---------- מדריך ----------
   // בכל תכונה חדשה - להוסיף איבר כאן (GUIDE_MODES) ו/או ב-CHANGELOG, מהחדש לישן
@@ -1199,10 +1202,11 @@
   function aeSoloReview(letter, cats, answers) {
     const rows = cats.map(code => {
       const a = answers[code] || '';
-      return { code, c: AE_CAT_BY_CODE[code], a, ok: !!a };
+      const structOk = aeIsStructOk(a, letter);
+      return { code, c: AE_CAT_BY_CODE[code], a, structOk, ok: structOk };
     });
     const render = () => {
-      const score = rows.reduce((s, row) => s + (row.ok ? 1 : 0), 0);
+      const score = rows.reduce((s, row) => s + (row.structOk && row.ok ? 1 : 0), 0);
       show(
         '<div class="topbar"><h2>סיכום הסבב</h2></div>' +
         '<div class="center muted">האות: <b style="color:var(--accent);font-size:20px">' + esc(letter) + '</b></div>' +
@@ -1210,14 +1214,17 @@
         '<div class="center muted" style="margin-bottom:10px">תשובות שסימנת כתקינות</div>' +
         '<div class="list">' + rows.map(row =>
           '<div class="li"><span class="rank">' + row.c.icon + '</span>' +
-          '<span class="name">' + esc(row.c.name) + (row.a ? ': ' + esc(row.a) : ' - (לא נכתב)') + '</span>' +
-          (row.a ? '<button class="chip' + (row.ok ? ' on' : '') + '" data-code="' + row.code + '" style="flex:none">✓ תקין</button>' : '') +
+          (row.a && !row.structOk
+            ? '<span class="name muted" style="text-decoration:line-through">' + esc(row.c.name) + ': ' + esc(row.a) + '</span><span class="muted" style="flex:none;font-size:12px">⚠️ לא תקינה</span>'
+            : '<span class="name">' + esc(row.c.name) + (row.a ? ': ' + esc(row.a) : ' - (לא נכתב)') + '</span>' +
+              (row.a ? '<button class="chip' + (row.ok ? ' on' : '') + '" data-code="' + row.code + '" style="flex:none">✓ תקין</button>' : '')) +
           '</div>').join('') + '</div>' +
         '<div class="spacer"></div><button class="btn primary" id="finish">סיום</button>',
         aeSoloSetup
       );
       $app.querySelectorAll('[data-code]').forEach(btn => btn.addEventListener('click', () => {
         const row = rows.find(x => x.code === btn.dataset.code);
+        if (!row.structOk) return;
         row.ok = !row.ok; render();
       }));
       on('#finish', () => {
@@ -1411,7 +1418,7 @@
     r.cats.forEach(code => {
       if (!r.valid[r.me.pid]) r.valid[r.me.pid] = {};
       if (r.valid[r.me.pid][code] === undefined) {
-        const val = !!(mine[code] && mine[code].trim());
+        const val = aeIsStructOk(mine[code], r.letter);
         r.valid[r.me.pid][code] = val;
         aeSendAll(r, { t: 'validity', pid: r.me.pid, cat: code, valid: val });
       }
@@ -1468,8 +1475,8 @@
     if (pids.length === 2) {
       const [a, b] = pids;
       r.cats.forEach(code => {
-        const av = (r.valid[a] || {})[code] && ((r.answers[a] || {})[code] || '').trim();
-        const bv = (r.valid[b] || {})[code] && ((r.answers[b] || {})[code] || '').trim();
+        const av = (r.valid[a] || {})[code] && aeIsStructOk((r.answers[a] || {})[code], r.letter) && ((r.answers[a] || {})[code] || '').trim();
+        const bv = (r.valid[b] || {})[code] && aeIsStructOk((r.answers[b] || {})[code], r.letter) && ((r.answers[b] || {})[code] || '').trim();
         if (av && bv) { const pts = aeNorm(av) === aeNorm(bv) ? 1 : 2; totals[a] += pts; totals[b] += pts; }
         else if (av) totals[a] += 2;
         else if (bv) totals[b] += 2;
@@ -1479,8 +1486,13 @@
       const c = AE_CAT_BY_CODE[code];
       const cellHtml = pids.map(pid => {
         const ans = (r.answers[pid] || {})[code] || '';
-        const valid = !!((r.valid[pid] || {})[code]);
+        const structOk = aeIsStructOk(ans, r.letter);
+        const valid = structOk && !!((r.valid[pid] || {})[code]);
         if (!ans) return '<span class="muted" style="flex:1">(לא נכתב)</span>';
+        if (!structOk) {
+          return '<span class="muted" style="flex:1;text-decoration:line-through;overflow:hidden;text-overflow:ellipsis">' + esc(ans) + '</span>' +
+            '<span class="muted" style="flex:none;font-size:12px">⚠️ לא תקינה</span>';
+        }
         const tail = pid === r.me.pid
           ? '<button class="chip' + (valid ? ' on' : '') + '" data-code="' + code + '" style="flex:none">✓</button>'
           : (valid ? '<span class="tick">✓</span>' : '<span class="cross">✗</span>');
@@ -1518,8 +1530,8 @@
     if (pids.length === 2) {
       const [a, b] = pids;
       r.cats.forEach(code => {
-        const av = (r.valid[a] || {})[code] && ((r.answers[a] || {})[code] || '').trim();
-        const bv = (r.valid[b] || {})[code] && ((r.answers[b] || {})[code] || '').trim();
+        const av = (r.valid[a] || {})[code] && aeIsStructOk((r.answers[a] || {})[code], r.letter) && ((r.answers[a] || {})[code] || '').trim();
+        const bv = (r.valid[b] || {})[code] && aeIsStructOk((r.answers[b] || {})[code], r.letter) && ((r.answers[b] || {})[code] || '').trim();
         if (av && bv) { const pts = aeNorm(av) === aeNorm(bv) ? 1 : 2; r.scores[a] = (r.scores[a] || 0) + pts; r.scores[b] = (r.scores[b] || 0) + pts; }
         else if (av) r.scores[a] = (r.scores[a] || 0) + 2;
         else if (bv) r.scores[b] = (r.scores[b] || 0) + 2;
