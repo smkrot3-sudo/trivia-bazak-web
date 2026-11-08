@@ -82,6 +82,19 @@
     return false;
   };
 
+  // טוקן Push מהצד האנדרואידי - נשמר בשרת כדי שאפשר לשלוח התראה אמיתית גם כשהאפליקציה סגורה
+  window.onPushToken = function (token) {
+    if (!token || !profile.pid) return;
+    Net.savePushToken && Net.savePushToken(profile.pid, token).catch(() => {});
+  };
+
+  // הקשה על התראת הזמנה שהגיעה כשהאפליקציה היתה סגורה/ברקע
+  window.onInviteTapped = function (inv) {
+    if (!inv || !inv.room_code) return;
+    const go = () => enterRoom(inv.room_code, { creating: false });
+    if (!profile.name) nameScreen(go); else go();
+  };
+
   // ---------- צליל ורטט ----------
   let actx = null;
   function beep(freq, dur, type) {

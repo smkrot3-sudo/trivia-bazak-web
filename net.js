@@ -105,6 +105,17 @@
         room_code: row.room_code, mode: row.mode || null, level: row.level || null
       });
       if (error) throw error;
+      // התראת Push אמיתית (גם אם האפליקציה סגורה) - לא חוסם ולא מפיל את ההזמנה אם נכשל
+      try {
+        sb.functions.invoke('send-invite-push', {
+          body: { to_pid: row.to_pid, from_name: row.from_name, room_code: row.room_code, mode: row.mode, level: row.level }
+        }).catch(() => {});
+      } catch (e) {}
+    },
+    async savePushToken(pid, token) {
+      const sb = await getClient();
+      const { error } = await sb.from('trivia_push_tokens').upsert({ pid, token, updated_at: new Date().toISOString() });
+      if (error) throw error;
     },
     async listPendingInvites(pid) {
       const sb = await getClient();
@@ -196,6 +207,7 @@
       all.push(Object.assign({ id: Date.now() + Math.random(), consumed: false, created_at: new Date().toISOString() }, row));
       localStorage.setItem('mockInvites', JSON.stringify(all));
     },
+    async savePushToken() {},
     async listPendingInvites(pid) {
       const all = JSON.parse(localStorage.getItem('mockInvites') || '[]');
       return all.filter(i => i.to_pid === pid && !i.consumed);
