@@ -193,6 +193,7 @@
       '<button class="btn primary" id="solo"><span class="emoji">⏱️</span><span class="col">משחק יחיד<span class="sub">נגד השעון, ברמה שתבחר</span></span></button>' +
       '<button class="btn secondary" id="campaign" style="--stripe:var(--accent)"><span class="emoji">🗺️</span><span class="col">קמפיין<span class="sub">התקדמו שלב אחר שלב, ' + CAMPAIGN_TOTAL + ' שלבים</span></span></button>' +
       '<button class="btn secondary" id="online" style="--stripe:var(--accent2-b)"><span class="emoji">👥</span><span class="col">אונליין עם חברים<span class="sub">ראש בראש או חדר עם קוד</span></span></button>' +
+      '<button class="btn secondary" id="friends" style="--stripe:var(--accent2-a)"><span class="emoji">👫</span><span class="col">חברים קבועים<span class="sub">הוסיפו חברים והזמינו אותם למשחק</span></span></button>' +
       '<button class="btn ghost" id="lb"><span class="emoji">🏆</span><span class="col">טבלת מובילים<span class="sub">השיאים של כל השחקנים</span></span></button>' +
       '<div class="spacer"></div>' +
       '<button class="btn ghost small" id="sound">' + (profile.sound ? '🔊 צלילים ורטט: פועל' : '🔇 צלילים ורטט: כבוי') + '</button>'
@@ -200,9 +201,13 @@
     on('#solo', soloSetup);
     on('#campaign', campaignMap);
     on('#online', onlineMenu);
+    on('#friends', friendsScreen);
     on('#lb', () => leaderboard());
     on('#rename', e => { e.preventDefault(); nameScreen(home); });
     on('#sound', () => { profile.sound = !profile.sound; saveProfile(); home(); });
+    checkPendingInvites();
+    if (unwatchInvites) unwatchInvites();
+    unwatchInvites = Net.watchInvites(profile.pid, inv => showInviteBanner(inv));
   }
 
   function nameScreen(next) {
@@ -548,6 +553,86 @@
     });
   }
 
+  // ================= חברים קבועים =================
+
+  let unwatchInvites = null;
+  let shownInviteIds = new Set();
+
+  function checkPendingInvites() {
+    Net.listPendingInvites(profile.pid).then(list => {
+      const fresh = (list || []).find(inv => !shownInviteIds.has(inv.id));
+      if (fresh) showInviteBanner(fresh);
+    }).catch(() => {});
+  }
+
+  function showInviteBanner(inv) {
+    if (shownInviteIds.has(inv.id)) return;
+    shownInviteIds.add(inv.id);
+    modal('🎮 הוזמנת למשחק!', inv.from_name + ' מזמין/ה אותך לשחק', [
+      { label: 'להצטרף עכשיו', cls: 'primary', fn: () => { Net.consumeInvite(inv.id).catch(() => {}); enterRoom(inv.room_code, { creating: false }); } },
+      { label: 'לא עכשיו', fn: () => { Net.consumeInvite(inv.id).catch(() => {}); } }
+    ]);
+  }
+
+  function friendsScreen() {
+    if (!profile.name) return nameScreen(friendsScreen);
+    show(
+      '<div class="topbar"><button class="iconbtn" id="back">→</button><h2>👫 חברים קבועים</h2></div>' +
+      '<div class="card center"><div class="label">הקוד שלך - שלחו לחברים כדי שיוסיפו אתכם</div>' +
+      '<div style="font-weight:900;font-size:17px;word-break:break-all;direction:ltr;color:var(--accent)">' + esc(profile.pid) + '</div>' +
+      '<button class="btn small blue" id="shareMyCode" style="margin-top:10px">📤 שלח את הקוד שלי</button></div>' +
+      '<div class="card"><div class="label">הוספת חבר/ה לפי קוד</div>' +
+      '<input class="field" id="fcode" placeholder="הדבק כאן את הקוד שקיבלת" autocomplete="off">' +
+      '<div style="height:8px"></div>' +
+      '<input class="field" id="fname" maxlength="16" placeholder="איך לקרוא לו/לה?">' +
+      '<button class="btn primary small" id="addf" style="margin-top:10px">➕ הוסף/י חבר/ה</button></div>' +
+      '<div class="label" style="margin-top:4px">הרשימה שלך</div>' +
+      '<div id="flist"><div class="spinner"></div></div>',
+      home
+    );
+    on('#back', home);
+    on('#shareMyCode', shareMyFriendCode);
+    on('#addf', () => {
+      const code = $app.querySelector('#fcode').value.trim();
+      const name = $app.querySelector('#fname').value.trim().slice(0, 16);
+      if (!code) { toast('צריך להדביק קוד'); return; }
+      if (code === profile.pid) { toast('זה הקוד שלך 🙂'); return; }
+      if (!name) { toast('צריך לתת שם לחבר/ה'); return; }
+      Net.addFriend(profile.pid, code, name).then(() => { toast('נוסף/ה לחברים! 🎉'); friendsScreen(); })
+        .catch(() => toast('לא הצלחתי להוסיף - בדוק/י חיבור לאינטרנט'));
+    });
+    renderFriendsList();
+  }
+
+  function renderFriendsList() {
+    Net.listFriends(profile.pid).then(rows => {
+      const box = $app.querySelector('#flist'); if (!box) return;
+      if (!rows.length) { box.innerHTML = '<div class="card center muted">עוד אין חברים ברשימה. הוסיפו לפי קוד למעלה 👆</div>'; return; }
+      box.innerHTML = '<div class="list">' + rows.map(f =>
+        '<div class="li"><span class="rank">🙂</span><span class="name">' + esc(f.friend_name) + '</span>' +
+        '<button class="btn small blue" data-invite="' + esc(f.friend_pid) + '" data-name="' + esc(f.friend_name) + '" style="flex:none">🎮 הזמן/י</button>' +
+        '<button class="iconbtn" data-remove="' + esc(f.friend_pid) + '" style="flex:none;width:38px;height:38px">🗑️</button></div>'
+      ).join('') + '</div>';
+      box.querySelectorAll('[data-invite]').forEach(btn => btn.addEventListener('click', () => inviteFriend(btn.dataset.invite, btn.dataset.name)));
+      box.querySelectorAll('[data-remove]').forEach(btn => btn.addEventListener('click', () => {
+        modal('להסיר מהחברים?', '', [{ label: 'להשאיר', cls: 'primary' }, {
+          label: 'להסיר', fn: () => Net.removeFriend(profile.pid, btn.dataset.remove).then(renderFriendsList).catch(() => toast('לא הצלחתי להסיר'))
+        }]);
+      }));
+    }).catch(() => {
+      const box = $app.querySelector('#flist');
+      if (box) box.innerHTML = '<div class="card center">📡 אין חיבור לאינטרנט<br><span class="muted">רשימת החברים זמינה רק כשמחוברים</span></div>';
+    });
+  }
+
+  function inviteFriend(friendPid, friendName) {
+    const code = makeCode();
+    toast('שולח/ת הזמנה ל-' + friendName + '...');
+    Net.sendInvite({ from_pid: profile.pid, from_name: profile.name, to_pid: friendPid, room_code: code, mode: 'room' })
+      .then(() => { toast('ההזמנה נשלחה! 📬 פותח חדר...'); enterRoom(code, { creating: true }); })
+      .catch(() => toast('לא הצלחתי לשלוח הזמנה - בדוק/י חיבור לאינטרנט'));
+  }
+
   // ================= אונליין =================
 
   const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -800,6 +885,15 @@
       if (navigator.share) { navigator.share({ text }).catch(() => {}); return; }
       navigator.clipboard.writeText(text).then(() => toast('הועתק! הדבק לחברים'), () => toast('הקוד: ' + code));
     } catch (e) { toast('הקוד: ' + code); }
+  }
+
+  function shareMyFriendCode() {
+    const text = 'הוסף/י אותי כחבר/ה ב-' + BRAND + ' ⚡ הקוד שלי: ' + profile.pid;
+    try {
+      if (window.Android && Android.share) { Android.share(text); return; }
+      if (navigator.share) { navigator.share({ text }).catch(() => {}); return; }
+      navigator.clipboard.writeText(text).then(() => toast('הועתק! הדבק/י לחבר/ה'), () => toast('הקוד: ' + profile.pid));
+    } catch (e) { toast('הקוד: ' + profile.pid); }
   }
 
   function renderLobby(r) {

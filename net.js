@@ -76,6 +76,60 @@
         .order('score', { ascending: false }).limit(150);
       if (error) throw error;
       return data;
+    },
+
+    // ---------- חברים קבועים + הזמנות למשחק ----------
+    async addFriend(ownerPid, friendPid, friendName) {
+      const sb = await getClient();
+      const { error } = await sb.from('trivia_friends')
+        .upsert({ owner_pid: ownerPid, friend_pid: friendPid, friend_name: friendName }, { onConflict: 'owner_pid,friend_pid' });
+      if (error) throw error;
+    },
+    async listFriends(ownerPid) {
+      const sb = await getClient();
+      const { data, error } = await sb.from('trivia_friends')
+        .select('friend_pid,friend_name,created_at')
+        .eq('owner_pid', ownerPid).order('created_at', { ascending: true });
+      if (error) throw error;
+      return data;
+    },
+    async removeFriend(ownerPid, friendPid) {
+      const sb = await getClient();
+      const { error } = await sb.from('trivia_friends').delete().eq('owner_pid', ownerPid).eq('friend_pid', friendPid);
+      if (error) throw error;
+    },
+    async sendInvite(row) {
+      const sb = await getClient();
+      const { error } = await sb.from('trivia_invites').insert({
+        from_pid: row.from_pid, from_name: row.from_name, to_pid: row.to_pid,
+        room_code: row.room_code, mode: row.mode || null, level: row.level || null
+      });
+      if (error) throw error;
+    },
+    async listPendingInvites(pid) {
+      const sb = await getClient();
+      const { data, error } = await sb.from('trivia_invites')
+        .select('id,from_pid,from_name,room_code,mode,level,created_at')
+        .eq('to_pid', pid).eq('consumed', false)
+        .order('created_at', { ascending: false }).limit(10);
+      if (error) throw error;
+      return data;
+    },
+    async consumeInvite(id) {
+      const sb = await getClient();
+      const { error } = await sb.from('trivia_invites').update({ consumed: true }).eq('id', id);
+      if (error) throw error;
+    },
+    // האזנה בזמן אמת להזמנות חדשות (כל עוד האפליקציה פתוחה) - החזרה היא פונקציית ביטול
+    watchInvites(pid, onInvite) {
+      let ch = null;
+      getClient().then(sb => {
+        ch = sb.channel('invites-' + pid)
+          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'trivia_invites', filter: 'to_pid=eq.' + pid },
+            payload => onInvite(payload.new))
+          .subscribe();
+      }).catch(() => {});
+      return () => { try { if (ch) ch.unsubscribe(); } catch (e) {} };
     }
   };
 
@@ -120,7 +174,38 @@
     async topScores(mode, level) {
       const all = JSON.parse(localStorage.getItem('mockScores') || '[]');
       return all.filter(r => r.mode === mode && r.level === level).sort((a, b) => b.score - a.score).slice(0, 150);
-    }
+    },
+
+    async addFriend(ownerPid, friendPid, friendName) {
+      const all = JSON.parse(localStorage.getItem('mockFriends') || '[]');
+      const i = all.findIndex(f => f.owner_pid === ownerPid && f.friend_pid === friendPid);
+      const row = { owner_pid: ownerPid, friend_pid: friendPid, friend_name: friendName, created_at: new Date().toISOString() };
+      if (i >= 0) all[i] = row; else all.push(row);
+      localStorage.setItem('mockFriends', JSON.stringify(all));
+    },
+    async listFriends(ownerPid) {
+      const all = JSON.parse(localStorage.getItem('mockFriends') || '[]');
+      return all.filter(f => f.owner_pid === ownerPid);
+    },
+    async removeFriend(ownerPid, friendPid) {
+      const all = JSON.parse(localStorage.getItem('mockFriends') || '[]');
+      localStorage.setItem('mockFriends', JSON.stringify(all.filter(f => !(f.owner_pid === ownerPid && f.friend_pid === friendPid))));
+    },
+    async sendInvite(row) {
+      const all = JSON.parse(localStorage.getItem('mockInvites') || '[]');
+      all.push(Object.assign({ id: Date.now() + Math.random(), consumed: false, created_at: new Date().toISOString() }, row));
+      localStorage.setItem('mockInvites', JSON.stringify(all));
+    },
+    async listPendingInvites(pid) {
+      const all = JSON.parse(localStorage.getItem('mockInvites') || '[]');
+      return all.filter(i => i.to_pid === pid && !i.consumed);
+    },
+    async consumeInvite(id) {
+      const all = JSON.parse(localStorage.getItem('mockInvites') || '[]');
+      const row = all.find(i => i.id === id); if (row) row.consumed = true;
+      localStorage.setItem('mockInvites', JSON.stringify(all));
+    },
+    watchInvites() { return () => {}; }
   };
 
   window.Net = isMock ? MockNet : SupabaseNet;
