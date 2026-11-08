@@ -129,6 +129,18 @@ h1, h2, h3 { margin: 0; font-weight: 800; text-wrap: balance; }
 .center { text-align: center; }
 .muted { color: var(--muted); }
 
+.guide-item summary { cursor: pointer; font-weight: 800; font-size: 15px; list-style: none; display: flex; align-items: center; gap: 10px; }
+.guide-item summary::-webkit-details-marker { display: none; }
+.guide-item summary::after { content: '▾'; margin-inline-start: auto; color: var(--muted); transition: transform .15s; }
+.guide-item[open] summary::after { transform: rotate(180deg); }
+.guide-item .guide-body { margin-top: 10px; color: var(--muted); font-size: 14px; line-height: 1.55; }
+.guide-item + .guide-item { margin-top: 10px; }
+.changelog-item { padding: 10px 2px; border-bottom: 1px solid var(--line); }
+.changelog-item:last-child { border-bottom: none; }
+.changelog-date { font-size: 12px; color: var(--muted); font-weight: 700; }
+.changelog-title { font-weight: 800; margin: 2px 0; }
+.changelog-desc { font-size: 13px; color: var(--muted); line-height: 1.45; }
+
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip {
   padding: 10px 14px; border-radius: var(--r-pill); border: 1px solid var(--line);

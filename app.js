@@ -47,6 +47,47 @@
   const aeRandCats = () => shuffle(AE_CATS).slice(0, 6).map(c => c.code);
   const aeNorm = s => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
 
+  // ---------- מדריך ----------
+  // בכל תכונה חדשה - להוסיף איבר כאן (GUIDE_MODES) ו/או ב-CHANGELOG, מהחדש לישן
+  const GUIDE_MODES = [
+    { icon: '⏱️', title: 'משחק יחיד', body: 'נגד השעון: קלאסי (10 שאלות, זמן לכל שאלה) או ספרינט (כמה שיותר תשובות נכונות בדקה). 4 רמות קושי ו-11+ נושאים לבחירה.' },
+    { icon: '🗺️', title: 'קמפיין', body: '30 שלבים ברצף, הרמה עולה בהדרגה. כל 5 שלבים - שלב נושא ממוקד. צריך 60% ומעלה כדי לפתוח את השלב הבא.' },
+    { icon: '🔤', title: 'ארץ עיר', body: 'המשחק הקלאסי: אות אקראית ו-6 קטגוריות, כותבים מילה שמתחילה באות. יחיד (נגד השעון, עם שיא אישי) או ראש בראש אונליין (3 סבבים, ניקוד לפי תקינות שמסמנים לבד).' },
+    { icon: '👥', title: 'אונליין עם חברים', body: 'ראש בראש מהיר מול יריב אקראי, או חדר עם קוד של 4 תווים לעד 8 חברים, עם בחירת נושאים ורמה.' },
+    { icon: '👫', title: 'חברים קבועים', body: 'מוסיפים חבר/ה לפי קוד אישי, ומזמינים ישר למשחק. ההזמנה מגיעה בזמן אמת אם האפליקציה פתוחה, ואפילו כהתראה לטלפון אם היא סגורה.' },
+    { icon: '🏆', title: 'טבלת מובילים', body: 'השיאים של כל השחקנים, לכל מצב ורמה בנפרד.' }
+  ];
+  const CHANGELOG = [
+    { date: '08/11/2026', title: '🔤 מצב משחק חדש: ארץ עיר', body: 'אות אקראית וקטגוריות, יחיד ואונליין ראש בראש.' },
+    { date: '08/11/2026', title: '🔔 התראות Push אמיתיות', body: 'הזמנה למשחק מגיעה כהתראה לטלפון גם כשהאפליקציה סגורה.' },
+    { date: '08/11/2026', title: '👫 חברים קבועים', body: 'הוספת חברים לפי קוד אישי, והזמנה ישירה למשחק.' },
+    { date: '08/11/2026', title: '🎨 עיצוב ומיתוג מחדש', body: 'שם חדש - "ידעתי", לוגו, צבעים וטיפוגרפיה חדשים.' },
+    { date: '08/11/2026', title: '📚 אלפי שאלות וקמפיין', body: 'מאגר השאלות הורחב לאלפי שאלות, נוסף מצב קמפיין (שלבים), ונושאים ייעודיים כמו גיימינג, הארי פוטר, מלחמת הכוכבים, מארוול, אווטאר ועוד.' },
+    { date: '08/11/2026', title: '⚡ עדכונים חיים', body: 'מעכשיו האפליקציה מתעדכנת מעצמה - אין צורך בהתקנת APK חדש לכל שינוי תוכן.' },
+    { date: '07/11/2026', title: '🔊 צלילים ושאלות נוספות', body: 'צליל קליק לכל כפתור, והרחבת מאגר השאלות הראשונית.' },
+    { date: '07/11/2026', title: '🚀 גרסה ראשונה', body: 'המשחק עולה לאוויר: משחק יחיד ואונליין עם חברים.' }
+  ];
+
+  function guideScreen() {
+    show(
+      '<div class="topbar"><button class="iconbtn" id="back">→</button><h2>📖 מדריך</h2></div>' +
+      brandmark(false) +
+      '<div class="label" style="margin-top:4px">מצבי המשחק</div>' +
+      GUIDE_MODES.map(m =>
+        '<details class="card guide-item"><summary><span class="emoji">' + m.icon + '</span> ' + esc(m.title) + '</summary>' +
+        '<div class="guide-body">' + esc(m.body) + '</div></details>'
+      ).join('') +
+      '<div class="label" style="margin-top:14px">מה חדש</div>' +
+      '<div class="card">' + CHANGELOG.map(c =>
+        '<div class="changelog-item"><div class="changelog-date">' + esc(c.date) + '</div>' +
+        '<div class="changelog-title">' + esc(c.title) + '</div>' +
+        '<div class="changelog-desc">' + esc(c.body) + '</div></div>'
+      ).join('') + '</div>',
+      home
+    );
+    on('#back', home);
+  }
+
   // ---------- מיתוג ----------
   const BRAND = 'ידעתי';
   const BRAND_ICON =
@@ -231,6 +272,7 @@
       '<button class="btn secondary" id="online" style="--stripe:var(--accent2-b)"><span class="emoji">👥</span><span class="col">אונליין עם חברים<span class="sub">ראש בראש או חדר עם קוד</span></span></button>' +
       '<button class="btn secondary" id="friends" style="--stripe:var(--accent2-a)"><span class="emoji">👫</span><span class="col">חברים קבועים<span class="sub">הוסיפו חברים והזמינו אותם למשחק</span></span></button>' +
       '<button class="btn ghost" id="lb"><span class="emoji">🏆</span><span class="col">טבלת מובילים<span class="sub">השיאים של כל השחקנים</span></span></button>' +
+      '<button class="btn ghost small" id="guide">📖 מדריך ומה חדש</button>' +
       '<div class="spacer"></div>' +
       '<button class="btn ghost small" id="sound">' + (profile.sound ? '🔊 צלילים ורטט: פועל' : '🔇 צלילים ורטט: כבוי') + '</button>'
     );
@@ -240,6 +282,7 @@
     on('#online', onlineMenu);
     on('#friends', friendsScreen);
     on('#lb', () => leaderboard());
+    on('#guide', guideScreen);
     on('#rename', e => { e.preventDefault(); nameScreen(home); });
     on('#sound', () => { profile.sound = !profile.sound; saveProfile(); home(); });
     checkPendingInvites();
