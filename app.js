@@ -22,7 +22,7 @@
   const LEVELS = { easy: 'קל', medium: 'בינוני', hard: 'קשה', mixed: 'מעורב' };
   const LEVEL_DIFF = { easy: 1, medium: 2, hard: 3 };
   const Q_TIME = { easy: 20, medium: 15, hard: 12, mixed: 15 };
-  const MODES = { classic: 'קלאסי', sprint: 'ספרינט 60 שניות', online: 'אונליין' };
+  const MODES = { classic: 'קלאסי', sprint: 'ספרינט 60 שניות', survival: 'הישרדות', reversetime: 'זמן הפוך', online: 'אונליין' };
   const KEYS = ['א', 'ב', 'ג', 'ד'];
 
   // ---------- ארץ עיר ----------
@@ -53,7 +53,7 @@
   // ---------- מדריך ----------
   // בכל תכונה חדשה - להוסיף איבר כאן (GUIDE_MODES) ו/או ב-CHANGELOG, מהחדש לישן
   const GUIDE_MODES = [
-    { icon: '⏱️', title: 'משחק יחיד', body: 'נגד השעון: קלאסי (10 שאלות, זמן לכל שאלה) או ספרינט (כמה שיותר תשובות נכונות בדקה). 4 רמות קושי ו-11+ נושאים לבחירה.' },
+    { icon: '⏱️', title: 'משחק יחיד', body: 'נגד השעון: קלאסי (10 שאלות), ספרינט (כמה שיותר נכונות בדקה), הישרדות (טעות אחת וזהו - עד כמה רחוק מגיעים ברצף), או זמן הפוך (30 שניות שמתארכות/מתקצרות לפי התשובות). 4 רמות קושי ו-11+ נושאים לבחירה.' },
     { icon: '🗺️', title: 'קמפיין', body: '30 שלבים ברצף, הרמה עולה בהדרגה. כל 5 שלבים - שלב נושא ממוקד. צריך 60% ומעלה כדי לפתוח את השלב הבא.' },
     { icon: '🔤', title: 'ארץ עיר', body: 'המשחק הקלאסי: אות אקראית ו-6 קטגוריות, כותבים מילה שמתחילה באות. יחיד (נגד השעון, עם שיא אישי) או ראש בראש אונליין (3 סבבים, ניקוד לפי תקינות שמסמנים לבד).' },
     { icon: '👥', title: 'אונליין עם חברים', body: 'ראש בראש מהיר מול יריב אקראי, או חדר עם קוד של 4 תווים לעד 8 חברים, עם בחירת נושאים ורמה.' },
@@ -61,6 +61,7 @@
     { icon: '🏆', title: 'טבלת מובילים', body: 'השיאים של כל השחקנים, לכל מצב ורמה בנפרד.' }
   ];
   const CHANGELOG = [
+    { date: '08/11/2026', title: '🔥⏳ שני מצבי משחק יחיד חדשים', body: 'הישרדות (טעות אחת וזהו - עד כמה רחוק מגיעים ברצף) וזמן הפוך (טיימר גלובלי שמתארך/מתקצר לפי התשובות).' },
     { date: '08/11/2026', title: '🔤 מצב משחק חדש: ארץ עיר', body: 'אות אקראית וקטגוריות, יחיד ואונליין ראש בראש.' },
     { date: '08/11/2026', title: '🔔 התראות Push אמיתיות', body: 'הזמנה למשחק מגיעה כהתראה לטלפון גם כשהאפליקציה סגורה.' },
     { date: '08/11/2026', title: '👫 חברים קבועים', body: 'הוספת חברים לפי קוד אישי, והזמנה ישירה למשחק.' },
@@ -332,10 +333,13 @@
     show(
       '<div class="topbar"><button class="iconbtn" id="back">→</button><h2>משחק יחיד</h2></div>' +
       '<div class="card"><div class="label">סוג משחק</div>' +
-      chipsHtml('mode', { classic: '🎯 קלאסי – 10 שאלות', sprint: '⚡ ספרינט 60 שניות' }, soloCfg.mode) +
-      '<div class="muted" style="font-size:14px;margin-top:10px">' + (soloCfg.mode === 'classic'
-        ? 'זמן מוגבל לכל שאלה. ככל שעונים מהר יותר - יותר נקודות.'
-        : 'כמה שיותר תשובות נכונות בדקה. טעות מורידה 3 שניות, רצף מוסיף בונוס.') + '</div></div>' +
+      chipsHtml('mode', { classic: '🎯 קלאסי – 10 שאלות', sprint: '⚡ ספרינט 60 שניות', survival: '🔥 הישרדות', reversetime: '⏳ זמן הפוך' }, soloCfg.mode) +
+      '<div class="muted" style="font-size:14px;margin-top:10px">' + ({
+        classic: 'זמן מוגבל לכל שאלה. ככל שעונים מהר יותר - יותר נקודות.',
+        sprint: 'כמה שיותר תשובות נכונות בדקה. טעות מורידה 3 שניות, רצף מוסיף בונוס.',
+        survival: 'טעות אחת (או פספוס הזמן) וזהו - עד כמה רחוק תגיעו ברצף של תשובות נכונות?',
+        reversetime: 'מתחילים עם 30 שניות. תשובה נכונה מוסיפה 5 שניות ועוברים ישר הלאה, טעות מורידה 7 שניות. כמה תשפיקו לפני שנגמר הזמן?'
+      }[soloCfg.mode]) + '</div></div>' +
       '<div class="card"><div class="label">רמת קושי</div>' + chipsHtml('level', LEVELS, soloCfg.level) + '</div>' +
       '<div class="card"><div class="label">נושא</div>' + chipsHtml('cat', catItems, soloCfg.cat) +
       (soloCfg.cat !== 'all' ? '<div class="muted" style="font-size:13px;margin-top:8px">רק משחקים בכל הנושאים נכנסים לטבלת המובילים</div>' : '') + '</div>' +
@@ -411,6 +415,8 @@
   }
 
   function soloGame(cfg) {
+    if (cfg.mode === 'survival') return soloSurvival(cfg);
+    if (cfg.mode === 'reversetime') return soloReverseTime(cfg);
     const sprint = cfg.mode === 'sprint';
     if (!sprint) {
       const ids = pickQuestions(cfg.level, cfg.cat, 10);
@@ -490,13 +496,136 @@
     render();
   }
 
+  // ---------- הישרדות: טעות אחת (או פספוס זמן) וזהו ----------
+  function soloSurvival(cfg) {
+    let ids = pickQuestions(cfg.level, cfg.cat, 60);
+    if (!ids.length) { toast('אין שאלות לבחירה הזו'); return soloSetup(); }
+    let qi = 0;
+    const st = { score: 0, correct: 0, bestStreak: 0, answered: 0 };
+    const T = Q_TIME[cfg.level];
+    let qTimer = null;
+    const quit = () => confirmQuit(() => { if (qTimer) qTimer.stop(); clearTimers(); soloSetup(); });
+
+    function nextId() {
+      if (qi >= ids.length) { ids = pickQuestions(cfg.level, cfg.cat, 60); qi = 0; if (!ids.length) return null; }
+      return ids[qi++];
+    }
+
+    function finish() { clearTimers(); soloResults(cfg, st); }
+
+    function render() {
+      const id = nextId();
+      if (id == null) { finish(); return; }
+      const qh = questionHtml(id, st.correct + 1, 0);
+      const hud =
+        '<div class="hud"><button class="iconbtn" id="quit">✕</button>' +
+        '<span class="pill score">🔥 ' + st.correct + '</span>' +
+        '<span class="spacer"></span><span class="bigtime" id="tl"></span></div>' +
+        '<div class="timer" id="tb"><div></div></div>';
+      $app.innerHTML = '<div class="screen">' + hud + '<div id="qarea" style="display:flex;flex-direction:column;gap:14px">' + qh.html + '<div class="flash" id="flash"></div></div></div>';
+      backHandler = quit;
+      on('#quit', quit);
+      let locked = false;
+      qTimer = runTimer('#tb', '#tl', T, () => answer(null));
+      $app.querySelectorAll('.answer').forEach(b => b.addEventListener('click', () => answer(b)));
+
+      function answer(btn) {
+        if (locked) return; locked = true;
+        qTimer.stop();
+        const ok = btn && btn.dataset.o === '0';
+        const flash = $app.querySelector('#flash');
+        $app.querySelectorAll('.answer').forEach(b => {
+          if (b.dataset.o === '0') b.classList.add('correct');
+          else if (b === btn) b.classList.add('wrong');
+          else b.classList.add('dim');
+        });
+        st.answered++;
+        if (ok) {
+          st.correct++; st.score = st.correct; st.bestStreak = st.correct;
+          flash.className = 'flash good'; flash.textContent = '✔ ' + st.correct + ' ברצף!';
+          sfx.good();
+          later(render, 900);
+        } else {
+          flash.textContent = btn ? 'טעות! נגמר הרצף' : 'נגמר הזמן! נגמר הרצף';
+          flash.className = 'flash bad';
+          sfx.bad();
+          later(finish, 1300);
+        }
+      }
+    }
+    render();
+  }
+
+  // ---------- זמן הפוך: טיימר גלובלי שמתארך/מתקצר לפי התשובות ----------
+  function soloReverseTime(cfg) {
+    let ids = pickQuestions(cfg.level, cfg.cat, 60);
+    if (!ids.length) { toast('אין שאלות לבחירה הזו'); return soloSetup(); }
+    let qi = 0;
+    const st = { score: 0, correct: 0, bestStreak: 0, answered: 0, bonus: 0 };
+    let globalTimer = null;
+    const quit = () => confirmQuit(() => { if (globalTimer) globalTimer.stop(); clearTimers(); soloSetup(); });
+
+    function nextId() {
+      if (qi >= ids.length) { ids = pickQuestions(cfg.level, cfg.cat, 60); qi = 0; if (!ids.length) return null; }
+      return ids[qi++];
+    }
+
+    function finish() { clearTimers(); st.bestStreak = st.correct; soloResults(cfg, st); }
+
+    function render() {
+      const id = nextId();
+      if (id == null) { finish(); return; }
+      const qh = questionHtml(id, st.correct + 1, 0);
+      const hud =
+        '<div class="hud"><button class="iconbtn" id="quit">✕</button>' +
+        '<span class="pill score">✔ ' + st.correct + '</span>' +
+        '<span class="spacer"></span><span class="bigtime" id="tl"></span></div>' +
+        '<div class="timer" id="tb"><div></div></div>';
+      if (globalTimer) {
+        $app.querySelector('#qarea').innerHTML = qh.html + '<div class="flash" id="flash"></div>';
+        const pills = $app.querySelector('.hud');
+        pills.querySelector('.score').textContent = '✔ ' + st.correct;
+      } else {
+        $app.innerHTML = '<div class="screen">' + hud + '<div id="qarea" style="display:flex;flex-direction:column;gap:14px">' + qh.html + '<div class="flash" id="flash"></div></div></div>';
+        backHandler = quit;
+        on('#quit', quit);
+      }
+      let locked = false;
+      if (!globalTimer) globalTimer = runTimer('#tb', '#tl', 30, finish, () => st.bonus);
+      $app.querySelectorAll('.answer').forEach(b => b.addEventListener('click', () => answer(b)));
+
+      function answer(btn) {
+        if (locked) return; locked = true;
+        const ok = btn && btn.dataset.o === '0';
+        const flash = $app.querySelector('#flash');
+        $app.querySelectorAll('.answer').forEach(b => {
+          if (b.dataset.o === '0') b.classList.add('correct');
+          else if (b === btn) b.classList.add('wrong');
+          else b.classList.add('dim');
+        });
+        st.answered++;
+        if (ok) {
+          st.correct++; st.score = st.correct; st.bonus += 5;
+          flash.className = 'flash good'; flash.textContent = '+5 שניות';
+          sfx.good();
+        } else {
+          st.bonus -= 7;
+          flash.className = 'flash bad'; flash.textContent = '−7 שניות';
+          sfx.bad();
+        }
+        later(render, ok ? 450 : 700);
+      }
+    }
+    render();
+  }
+
   function soloResults(cfg, st) {
     sfx.end();
     const key = 'best:' + cfg.mode + ':' + cfg.level + ':' + cfg.cat;
     const prev = store.get(key, 0);
     const isBest = st.score > prev;
     if (isBest) store.set(key, st.score);
-    const canSubmit = cfg.cat === 'all' && st.score > 0;
+    const canSubmit = cfg.cat === 'all' && st.score > 0 && (cfg.mode === 'classic' || cfg.mode === 'sprint');
     const pct = st.answered ? Math.round(100 * st.correct / st.answered) : 0;
     show(
       '<div class="topbar"><button class="iconbtn" id="back">→</button><h2>סיום!</h2></div>' +
