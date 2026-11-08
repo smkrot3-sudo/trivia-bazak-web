@@ -25,6 +25,28 @@
   const MODES = { classic: 'קלאסי', sprint: 'ספרינט 60 שניות', online: 'אונליין' };
   const KEYS = ['א', 'ב', 'ג', 'ד'];
 
+  // ---------- ארץ עיר ----------
+  const AE_LETTERS = ['א', 'ב', 'ג', 'ד', 'ה', 'ו', 'ז', 'ח', 'ט', 'י', 'כ', 'ל', 'מ', 'נ', 'ס', 'ע', 'פ', 'צ', 'ק', 'ר', 'ש', 'ת'];
+  const AE_CATS = [
+    { code: 'country', name: 'ארץ', icon: '🌍' },
+    { code: 'city', name: 'עיר', icon: '🏙️' },
+    { code: 'animal', name: 'חיה', icon: '🐾' },
+    { code: 'plant', name: 'צומח', icon: '🌿' },
+    { code: 'food', name: 'מאכל', icon: '🍽️' },
+    { code: 'name', name: 'שם פרטי', icon: '🧑' },
+    { code: 'job', name: 'מקצוע', icon: '💼' },
+    { code: 'brand', name: 'מותג', icon: '🏷️' },
+    { code: 'celeb', name: 'ידוען/סלב', icon: '⭐' },
+    { code: 'object', name: 'חפץ בבית', icon: '🪑' },
+    { code: 'sport', name: 'ענף ספורט', icon: '⚽' },
+    { code: 'color', name: 'צבע', icon: '🎨' }
+  ];
+  const AE_CAT_BY_CODE = {}; AE_CATS.forEach(c => { AE_CAT_BY_CODE[c.code] = c; });
+  const AE_TIMER_OPTS = { 60: '60 שניות', 90: '90 שניות', 120: '120 שניות' };
+  const aeRandLetter = () => AE_LETTERS[Math.floor(Math.random() * AE_LETTERS.length)];
+  const aeRandCats = () => shuffle(AE_CATS).slice(0, 6).map(c => c.code);
+  const aeNorm = s => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
+
   // ---------- מיתוג ----------
   const BRAND = 'ידעתי';
   const BRAND_ICON =
@@ -205,6 +227,7 @@
       '<div class="card center">שלום, <b>' + esc(profile.name) + '</b> 👋 <a href="#" id="rename" class="muted" style="font-size:14px">שינוי שם</a></div>' +
       '<button class="btn primary" id="solo"><span class="emoji">⏱️</span><span class="col">משחק יחיד<span class="sub">נגד השעון, ברמה שתבחר</span></span></button>' +
       '<button class="btn secondary" id="campaign" style="--stripe:var(--accent)"><span class="emoji">🗺️</span><span class="col">קמפיין<span class="sub">התקדמו שלב אחר שלב, ' + CAMPAIGN_TOTAL + ' שלבים</span></span></button>' +
+      '<button class="btn secondary" id="ae" style="--stripe:#2fbf71"><span class="emoji">🔤</span><span class="col">ארץ עיר<span class="sub">יחיד או ראש בראש - מילה שמתחילה באות</span></span></button>' +
       '<button class="btn secondary" id="online" style="--stripe:var(--accent2-b)"><span class="emoji">👥</span><span class="col">אונליין עם חברים<span class="sub">ראש בראש או חדר עם קוד</span></span></button>' +
       '<button class="btn secondary" id="friends" style="--stripe:var(--accent2-a)"><span class="emoji">👫</span><span class="col">חברים קבועים<span class="sub">הוסיפו חברים והזמינו אותם למשחק</span></span></button>' +
       '<button class="btn ghost" id="lb"><span class="emoji">🏆</span><span class="col">טבלת מובילים<span class="sub">השיאים של כל השחקנים</span></span></button>' +
@@ -213,6 +236,7 @@
     );
     on('#solo', soloSetup);
     on('#campaign', campaignMap);
+    on('#ae', aeHome);
     on('#online', onlineMenu);
     on('#friends', friendsScreen);
     on('#lb', () => leaderboard());
@@ -1066,6 +1090,467 @@
         .then(() => { const s = $app.querySelector('#sub'); if (s) s.textContent = '✓ נשמר בטבלת המובילים'; })
         .catch(() => { const s = $app.querySelector('#sub'); if (s) s.textContent = ''; });
     } else { const s = $app.querySelector('#sub'); if (s) s.textContent = ''; }
+  }
+
+  // ================= ארץ עיר =================
+
+  function aeHome() {
+    if (!profile.name) return nameScreen(aeHome);
+    show(
+      '<div class="topbar"><button class="iconbtn" id="back">→</button><h2>🔤 ארץ עיר</h2></div>' +
+      '<div class="card center muted">בוחרים אות אקראית, וכותבים מילה שמתחילה בה לכל קטגוריה - תחת זמן מוגבל!</div>' +
+      '<button class="btn primary" id="solo"><span class="emoji">🧍</span><span class="col">יחיד<span class="sub">מתאמנים בעצמכם, נגד השעון</span></span></button>' +
+      '<button class="btn secondary" id="vs" style="--stripe:var(--accent2-b)"><span class="emoji">⚔️</span><span class="col">ראש בראש מול חבר<span class="sub">3 סבבים, ניקוד מצטבר</span></span></button>',
+      home
+    );
+    on('#back', home);
+    on('#solo', aeSoloSetup);
+    on('#vs', aeOnlineMenu);
+  }
+
+  // ---------- יחיד ----------
+  function aeSoloSetup() {
+    const seconds = store.get('aeSeconds', 90);
+    const best = store.get('aeSoloBest', 0);
+    show(
+      '<div class="topbar"><button class="iconbtn" id="back">→</button><h2>🔤 ארץ עיר - יחיד</h2></div>' +
+      '<div class="card"><div class="label">זמן לסבב</div>' +
+      chipsHtml('sec', AE_TIMER_OPTS, String(seconds)) + '</div>' +
+      '<div class="center muted">השיא שלך: <b style="color:var(--accent)">' + best + '</b> תשובות תקינות בסבב אחד</div>' +
+      '<div class="spacer"></div><button class="btn primary" id="go">התחל ▶</button>',
+      aeHome
+    );
+    on('#back', aeHome);
+    onAll('.chip', el => { store.set('aeSeconds', +el.dataset.v); aeSoloSetup(); });
+    on('#go', () => aeSoloPlay(store.get('aeSeconds', 90)));
+  }
+
+  function aeSoloPlay(seconds) {
+    const letter = aeRandLetter();
+    const cats = aeRandCats();
+    const quit = () => confirmQuit(() => { clearTimers(); aeSoloSetup(); });
+    show(
+      '<div class="hud"><button class="iconbtn" id="quit">✕</button><span class="spacer"></span><span class="bigtime" id="tl"></span></div>' +
+      '<div class="timer" id="tb"><div></div></div>' +
+      '<div class="roomcode" style="font-size:64px;margin:6px 0">' + esc(letter) + '</div>' +
+      '<div class="center muted" style="margin-bottom:6px">כל מילה צריכה להתחיל באות הזו</div>' +
+      '<div class="list" id="catlist">' + cats.map(code => {
+        const c = AE_CAT_BY_CODE[code];
+        return '<div class="li"><span class="rank">' + c.icon + '</span>' +
+          '<input class="field" data-cat="' + code + '" placeholder="' + esc(c.name) + '" autocomplete="off" style="flex:1;margin:0"></div>';
+      }).join('') + '</div>' +
+      '<div class="spacer"></div><button class="btn primary" id="done">סיימתי ✓</button>',
+      quit
+    );
+    on('#quit', quit);
+    const finish = () => {
+      const answers = {};
+      cats.forEach(code => { const el = $app.querySelector('[data-cat="' + code + '"]'); answers[code] = el ? el.value.trim() : ''; });
+      clearTimers();
+      aeSoloReview(letter, cats, answers);
+    };
+    on('#done', finish);
+    runTimer('#tb', '#tl', seconds, finish);
+  }
+
+  function aeSoloReview(letter, cats, answers) {
+    const rows = cats.map(code => {
+      const a = answers[code] || '';
+      return { code, c: AE_CAT_BY_CODE[code], a, ok: !!a };
+    });
+    const render = () => {
+      const score = rows.reduce((s, row) => s + (row.ok ? 1 : 0), 0);
+      show(
+        '<div class="topbar"><h2>סיכום הסבב</h2></div>' +
+        '<div class="center muted">האות: <b style="color:var(--accent);font-size:20px">' + esc(letter) + '</b></div>' +
+        '<div class="bigscore">' + score + '</div>' +
+        '<div class="center muted" style="margin-bottom:10px">תשובות שסימנת כתקינות</div>' +
+        '<div class="list">' + rows.map(row =>
+          '<div class="li"><span class="rank">' + row.c.icon + '</span>' +
+          '<span class="name">' + esc(row.c.name) + (row.a ? ': ' + esc(row.a) : ' - (לא נכתב)') + '</span>' +
+          (row.a ? '<button class="chip' + (row.ok ? ' on' : '') + '" data-code="' + row.code + '" style="flex:none">✓ תקין</button>' : '') +
+          '</div>').join('') + '</div>' +
+        '<div class="spacer"></div><button class="btn primary" id="finish">סיום</button>',
+        aeSoloSetup
+      );
+      $app.querySelectorAll('[data-code]').forEach(btn => btn.addEventListener('click', () => {
+        const row = rows.find(x => x.code === btn.dataset.code);
+        row.ok = !row.ok; render();
+      }));
+      on('#finish', () => {
+        const prev = store.get('aeSoloBest', 0);
+        if (score > prev) { store.set('aeSoloBest', score); toast('שיא אישי חדש! 🎉'); }
+        aeSoloSetup();
+      });
+    };
+    render();
+  }
+
+  // ---------- אונליין ראש בראש ----------
+  let aeRoom = null;
+
+  function aeOnlineMenu() {
+    if (!profile.name) return nameScreen(aeOnlineMenu);
+    show(
+      '<div class="topbar"><button class="iconbtn" id="back">→</button><h2>🔤 ארץ עיר - אונליין</h2></div>' +
+      '<button class="btn primary" id="quick"><span class="emoji">⚔️</span><span class="col">ראש בראש מהיר<span class="sub">מצא יריב אקראי ושחקו מיד</span></span></button>' +
+      '<button class="btn blue" id="create"><span class="emoji">🏠</span><span class="col">צור חדר<span class="sub">קבל קוד ושלח לחבר (שני שחקנים)</span></span></button>' +
+      '<div class="card"><div class="label">יש לך קוד מחבר?</div>' +
+      '<input class="field code" id="code" maxlength="4" placeholder="קוד" autocomplete="off" autocapitalize="characters">' +
+      '<button class="btn" id="join" style="margin-top:10px">הצטרף לחדר</button></div>',
+      aeHome
+    );
+    on('#back', aeHome);
+    on('#quick', aeQuickMatch);
+    on('#create', () => aeEnterRoom(makeCode(), { creating: true }));
+    const inp = $app.querySelector('#code');
+    const join = () => {
+      const c = inp.value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+      if (c.length !== 4) { toast('הקוד צריך להיות 4 תווים'); return; }
+      aeEnterRoom(c, { creating: false });
+    };
+    on('#join', join);
+    on(inp, e => { if (e.key === 'Enter') join(); }, 'keydown');
+  }
+
+  function aeNoConnection() {
+    show('<div class="spacer"></div><div class="center" style="font-size:56px">📡</div>' +
+      '<div class="center" style="font-size:20px;font-weight:800">אין חיבור לשרת</div>' +
+      '<div class="center muted">בדוק שיש אינטרנט ונסה שוב</div><div class="spacer"></div>' +
+      '<button class="btn primary" id="retry">חזרה</button>', aeOnlineMenu);
+    on('#retry', aeOnlineMenu);
+  }
+
+  function aeQuickMatch() {
+    let handle = null, done = false;
+    const cancel = () => { done = true; if (handle) handle.leave(); aeOnlineMenu(); };
+    connecting('מחפש יריב...', cancel);
+    const meta = { pid: profile.pid, name: profile.name, t: Date.now() };
+    Net.join('ae-matchmaking', meta, {
+      onPresence(list) {
+        if (done) return;
+        const sorted = list.slice().sort((a, b) => (a.t - b.t) || (a.pid < b.pid ? -1 : 1));
+        const a = sorted[0], b = sorted[1];
+        if (!a || !b || (a.pid !== profile.pid && b.pid !== profile.pid)) {
+          const s = $app.querySelector('.center'); if (s) s.textContent = 'מחפש יריב... (' + list.length + ' מחפשים כרגע)';
+          return;
+        }
+        done = true;
+        const other = a.pid === profile.pid ? b : a;
+        const code = 'A' + hashCode(a.pid + '|' + b.pid);
+        setTimeout(() => { if (handle) handle.leave(); }, 300);
+        toast('נמצא יריב: ' + other.name + ' ⚔️');
+        aeEnterRoom(code, { creating: a.pid === profile.pid, quick: true });
+      }
+    }).then(h => { handle = h; if (done) h.leave(); })
+      .catch(() => { if (!done) { done = true; aeNoConnection(); } });
+  }
+
+  function aeEnterRoom(code, opts) {
+    if (aeRoom) aeLeaveRoom(true);
+    const r = aeRoom = {
+      code, opts, handle: null, players: [], phase: 'joining',
+      seconds: 90, round: 0, totalRounds: 3,
+      letter: null, cats: [], endsAt: 0,
+      answers: {}, valid: {}, scores: {}, graceTimer: null, wasHost: false,
+      me: { pid: profile.pid, name: profile.name, joinedAt: Date.now(), c: opts.creating ? 1 : 0 }
+    };
+    connecting(opts.quick ? 'מתחבר למשחק...' : opts.creating ? 'יוצר חדר...' : 'מצטרף לחדר ' + code + '...', () => aeLeaveRoom());
+
+    Net.join('ae-room-' + code, r.me, {
+      onPresence: list => { if (aeRoom === r) aeOnPresence(r, list); },
+      onMessage: msg => { if (aeRoom === r) aeOnMessage(r, msg); },
+      onStatus: () => { if (aeRoom === r) toast('החיבור לשרת נקטע...'); }
+    }).then(h => {
+      if (aeRoom !== r) { h.leave(); return; }
+      r.handle = h;
+      if (opts.creating) { r.phase = 'lobby'; aeRenderLobby(r); }
+      else {
+        aeSend(r, { t: 'hello', pid: r.me.pid, name: r.me.name });
+        const wait = opts.quick ? 10000 : 4000;
+        setTimeout(() => {
+          if (aeRoom !== r || r.phase !== 'joining') return;
+          aeLeaveRoom(true);
+          if (opts.quick) { toast('היריב לא התחבר, מחפש שוב...'); aeQuickMatch(); }
+          else { modal('החדר לא נמצא', 'בדוק את הקוד ושהחבר עדיין בחדר.', [{ label: 'הבנתי', cls: 'primary' }]); }
+        }, wait);
+      }
+    }).catch(() => { if (aeRoom === r) { aeRoom = null; aeNoConnection(); } });
+  }
+
+  function aeLeaveRoom(silent) {
+    const r = aeRoom; aeRoom = null;
+    if (!r) return;
+    clearTimeout(r.graceTimer);
+    if (r.handle) r.handle.leave();
+    if (!silent) aeOnlineMenu();
+  }
+
+  const aeSortPlayers = list => list.slice().sort((a, b) => ((b.c | 0) - (a.c | 0)) || (a.joinedAt - b.joinedAt) || (a.pid < b.pid ? -1 : 1));
+  const aeHostPid = r => r.players.length ? r.players[0].pid : r.me.pid;
+  const aeAmHost = r => aeHostPid(r) === r.me.pid;
+
+  function aeSend(r, msg) { if (r.handle) r.handle.send(msg); }
+  function aeSendAll(r, msg) { aeSend(r, msg); aeOnMessage(r, msg); }
+
+  function aeOnPresence(r, list) {
+    const before = r.players.map(p => p.pid);
+    r.players = aeSortPlayers(list);
+    if (!r.players.some(p => p.pid === r.me.pid)) r.players.push(r.me);
+    const now = r.players.map(p => p.pid);
+    if (r.phase !== 'joining') {
+      now.filter(p => before.indexOf(p) < 0 && p !== r.me.pid).forEach(pid => { const p = r.players.find(x => x.pid === pid); if (p) toast(p.name + ' הצטרף/ה'); });
+      before.filter(p => now.indexOf(p) < 0).forEach(() => toast('היריב/ה התנתק/ה'));
+    }
+    r.wasHost = aeAmHost(r);
+    if (r.phase === 'lobby') aeRenderLobby(r);
+    else if (r.phase === 'review') aeRenderReview(r);
+    else if (r.phase === 'final') aeRenderFinal(r);
+  }
+
+  function aeOnMessage(r, m) {
+    switch (m.t) {
+      case 'hello':
+        if (aeAmHost(r)) aeSend(r, { t: 'settings', seconds: r.seconds, phase: r.phase === 'lobby' || r.phase === 'joining' ? 'lobby' : 'game' });
+        break;
+      case 'settings':
+        r.seconds = m.seconds;
+        if (r.phase === 'joining') {
+          if (m.phase !== 'lobby') {
+            aeLeaveRoom(true);
+            modal('המשחק כבר התחיל', 'נסה להצטרף שוב כשהסבב הנוכחי ייגמר.', [{ label: 'הבנתי', cls: 'primary', fn: aeOnlineMenu }]);
+            return;
+          }
+          r.phase = 'lobby'; aeRenderLobby(r);
+        } else if (m.phase === 'lobby') {
+          if (r.phase !== 'lobby') r.scores = {};
+          r.phase = 'lobby'; aeRenderLobby(r);
+        }
+        break;
+      case 'start':
+        if (r.phase === 'joining') r.phase = 'lobby';
+        clearTimeout(r.graceTimer);
+        r.letter = m.letter; r.cats = m.cats; r.endsAt = m.endsAt; r.round = m.round;
+        r.answers = {}; r.valid = {};
+        if (m.scores) r.scores = m.scores;
+        r.players.forEach(p => { if (r.scores[p.pid] == null) r.scores[p.pid] = 0; });
+        r.phase = 'play';
+        aeRenderPlay(r);
+        break;
+      case 'submit':
+        r.answers[m.pid] = m.answers;
+        aeCheckAllSubmitted(r);
+        break;
+      case 'validity':
+        r.valid[m.pid] = r.valid[m.pid] || {};
+        r.valid[m.pid][m.cat] = m.valid;
+        if (r.phase === 'review') aeRenderReview(r);
+        break;
+      case 'final':
+        clearTimeout(r.graceTimer);
+        r.scores = m.scores; r.phase = 'final';
+        aeRenderFinal(r);
+        break;
+    }
+  }
+
+  function aeCheckAllSubmitted(r) {
+    if (r.phase !== 'play') return;
+    if (r.players.length < 2) return;
+    if (r.players.every(p => r.answers[p.pid])) aeGoReview(r);
+  }
+
+  function aeGoReview(r) {
+    clearTimeout(r.graceTimer);
+    r.phase = 'review';
+    aeRenderReview(r);
+    const mine = r.answers[r.me.pid] || {};
+    r.cats.forEach(code => {
+      if (!r.valid[r.me.pid]) r.valid[r.me.pid] = {};
+      if (r.valid[r.me.pid][code] === undefined) {
+        const val = !!(mine[code] && mine[code].trim());
+        r.valid[r.me.pid][code] = val;
+        aeSendAll(r, { t: 'validity', pid: r.me.pid, cat: code, valid: val });
+      }
+    });
+  }
+
+  function aeRenderPlay(r) {
+    const seconds = Math.max(0, Math.round((r.endsAt - Date.now()) / 1000));
+    const already = r.answers[r.me.pid];
+    const quit = () => confirmQuit(() => aeLeaveRoom());
+    show(
+      '<div class="hud"><button class="iconbtn" id="quit">✕</button>' +
+      '<span class="pill">סבב ' + r.round + '/' + r.totalRounds + '</span>' +
+      '<span class="spacer"></span><span class="bigtime" id="tl"></span></div>' +
+      '<div class="timer" id="tb"><div></div></div>' +
+      '<div class="roomcode" style="font-size:64px;margin:6px 0">' + esc(r.letter) + '</div>' +
+      '<div class="center muted" style="margin-bottom:6px">כל מילה צריכה להתחיל באות הזו</div>' +
+      '<div class="list" id="catlist">' + r.cats.map(code => {
+        const c = AE_CAT_BY_CODE[code];
+        return '<div class="li"><span class="rank">' + c.icon + '</span>' +
+          '<input class="field" data-cat="' + code + '" placeholder="' + esc(c.name) + '" autocomplete="off" style="flex:1;margin:0"' + (already ? ' disabled' : '') + '></div>';
+      }).join('') + '</div>' +
+      '<div class="spacer"></div>' +
+      (already ? '<div class="center muted">⏳ ממתין/ה ליריב/ה...</div>' : '<button class="btn primary" id="done">סיימתי ✓</button>'),
+      quit
+    );
+    on('#quit', quit);
+    if (already) {
+      r.cats.forEach(code => { const el = $app.querySelector('[data-cat="' + code + '"]'); if (el) el.value = already[code] || ''; });
+      return;
+    }
+    const submit = () => {
+      if (r.answers[r.me.pid]) return;
+      const answers = {};
+      r.cats.forEach(code => { const el = $app.querySelector('[data-cat="' + code + '"]'); answers[code] = el ? el.value.trim() : ''; });
+      aeSendAll(r, { t: 'submit', pid: r.me.pid, name: r.me.name, answers });
+      if (r.phase === 'play') {
+        r.graceTimer = setTimeout(() => {
+          if (aeRoom !== r || r.phase !== 'play') return;
+          r.players.forEach(p => { if (!r.answers[p.pid]) r.answers[p.pid] = {}; });
+          aeGoReview(r);
+        }, 15000);
+        aeRenderPlay(r);
+      }
+    };
+    on('#done', submit);
+    runTimer('#tb', '#tl', seconds, submit);
+  }
+
+  function aeRenderReview(r) {
+    const pids = r.players.map(p => p.pid);
+    const byPid = {}; r.players.forEach(p => { byPid[p.pid] = p; });
+    const totals = {}; pids.forEach(pid => { totals[pid] = 0; });
+    if (pids.length === 2) {
+      const [a, b] = pids;
+      r.cats.forEach(code => {
+        const av = (r.valid[a] || {})[code] && ((r.answers[a] || {})[code] || '').trim();
+        const bv = (r.valid[b] || {})[code] && ((r.answers[b] || {})[code] || '').trim();
+        if (av && bv) { const pts = aeNorm(av) === aeNorm(bv) ? 1 : 2; totals[a] += pts; totals[b] += pts; }
+        else if (av) totals[a] += 2;
+        else if (bv) totals[b] += 2;
+      });
+    }
+    const rowsHtml = r.cats.map(code => {
+      const c = AE_CAT_BY_CODE[code];
+      const cellHtml = pids.map(pid => {
+        const ans = (r.answers[pid] || {})[code] || '';
+        const valid = !!((r.valid[pid] || {})[code]);
+        if (!ans) return '<span class="muted" style="flex:1">(לא נכתב)</span>';
+        const tail = pid === r.me.pid
+          ? '<button class="chip' + (valid ? ' on' : '') + '" data-code="' + code + '" style="flex:none">✓</button>'
+          : (valid ? '<span class="tick">✓</span>' : '<span class="cross">✗</span>');
+        return '<span style="flex:1;overflow:hidden;text-overflow:ellipsis">' + esc(ans) + '</span>' + tail;
+      }).join('<span class="muted" style="margin:0 6px">|</span>');
+      return '<div class="li" style="flex-wrap:wrap"><span class="rank">' + c.icon + '</span>' +
+        '<span class="name" style="flex:none;min-width:70px">' + esc(c.name) + '</span>' + cellHtml + '</div>';
+    }).join('');
+    const host = aeAmHost(r);
+    const isLast = r.round >= r.totalRounds;
+    show(
+      '<div class="topbar"><h2>סבב ' + r.round + ' - סיכום</h2></div>' +
+      '<div class="center muted">האות: <b style="color:var(--accent);font-size:18px">' + esc(r.letter) + '</b> · כל שחקן מסמן רק את התשובות שלו</div>' +
+      '<div class="list">' + rowsHtml + '</div>' +
+      '<div class="card"><div class="label">ניקוד הסבב</div>' +
+      pids.map(pid => '<div>' + esc(byPid[pid] ? byPid[pid].name : '?') + (pid === r.me.pid ? ' (את/ה)' : '') + ': <b>' + (totals[pid] || 0) + '</b></div>').join('') + '</div>' +
+      '<div class="spacer"></div>' +
+      (host && pids.length >= 2
+        ? '<button class="btn primary" id="next">' + (isLast ? 'לתוצאות הסופיות 🏆' : 'לסבב הבא ▶') + '</button>'
+        : '<div class="center muted">⏳ ממתין/ה שהמארח ימשיך</div>'),
+      () => aeLeaveRoom()
+    );
+    $app.querySelectorAll('[data-code]').forEach(btn => btn.addEventListener('click', () => {
+      const code = btn.dataset.code;
+      const cur = !!((r.valid[r.me.pid] || {})[code]);
+      r.valid[r.me.pid] = r.valid[r.me.pid] || {};
+      r.valid[r.me.pid][code] = !cur;
+      aeSendAll(r, { t: 'validity', pid: r.me.pid, cat: code, valid: !cur });
+    }));
+    if (host) on('#next', () => aeHostAdvance(r));
+  }
+
+  function aeHostAdvance(r) {
+    const pids = r.players.map(p => p.pid);
+    if (pids.length === 2) {
+      const [a, b] = pids;
+      r.cats.forEach(code => {
+        const av = (r.valid[a] || {})[code] && ((r.answers[a] || {})[code] || '').trim();
+        const bv = (r.valid[b] || {})[code] && ((r.answers[b] || {})[code] || '').trim();
+        if (av && bv) { const pts = aeNorm(av) === aeNorm(bv) ? 1 : 2; r.scores[a] = (r.scores[a] || 0) + pts; r.scores[b] = (r.scores[b] || 0) + pts; }
+        else if (av) r.scores[a] = (r.scores[a] || 0) + 2;
+        else if (bv) r.scores[b] = (r.scores[b] || 0) + 2;
+      });
+    }
+    if (r.round >= r.totalRounds) {
+      aeSendAll(r, { t: 'final', scores: r.scores });
+    } else {
+      aeSendAll(r, {
+        t: 'start', letter: aeRandLetter(), cats: aeRandCats(),
+        endsAt: Date.now() + r.seconds * 1000, round: r.round + 1, scores: r.scores
+      });
+    }
+  }
+
+  function aeRenderFinal(r) {
+    sfx.end();
+    const ranked = r.players.map(p => ({ pid: p.pid, name: p.name, score: r.scores[p.pid] || 0 })).sort((a, b) => b.score - a.score);
+    const me = ranked.find(p => p.pid === r.me.pid) || { score: 0 };
+    const tie = ranked.length > 1 && ranked[0].score === ranked[1].score;
+    const won = ranked.length > 1 && ranked[0].pid === r.me.pid && !tie;
+    const head = ranked.length < 2 ? 'סיום!' : won ? '🏆 ניצחת!' : tie ? '🤝 תיקו!' : 'הפסד הפעם';
+    show(
+      '<div class="center" style="font-size:34px;font-weight:900;margin-top:16px">' + head + '</div>' +
+      '<div class="bigscore">' + me.score + '</div>' +
+      '<div class="card"><div class="label">התוצאות הסופיות</div><div class="list">' +
+      ranked.map((p, i) => '<div class="li' + (p.pid === r.me.pid ? ' me' : '') + '"><span class="rank">' + (i === 0 && !tie ? '🥇' : i + 1) + '</span>' +
+        '<span class="name">' + esc(p.name) + '</span><span class="pts">' + p.score + '</span></div>').join('') + '</div></div>' +
+      '<div class="spacer"></div>' +
+      (aeAmHost(r) ? '<button class="btn primary" id="again">משחק נוסף 🔁</button>' : '<div class="center muted">המארח/ת יכול/ה להתחיל משחק נוסף</div>') +
+      '<button class="btn small" id="leave">יציאה</button>',
+      () => aeLeaveRoom()
+    );
+    if (won) vibrate(300);
+    on('#leave', () => aeLeaveRoom());
+    on('#again', () => aeSendAll(r, { t: 'settings', seconds: r.seconds, phase: 'lobby' }));
+  }
+
+  function aeRenderLobby(r) {
+    const host = aeAmHost(r);
+    const hp = aeHostPid(r);
+    const players = r.players.length ? r.players : [r.me];
+    const confirmLeave = () => modal('לצאת מהחדר?', '', [{ label: 'להישאר', cls: 'primary' }, { label: 'לצאת', fn: () => aeLeaveRoom() }]);
+    show(
+      '<div class="topbar"><button class="iconbtn" id="back">→</button><h2>🔤 ' + (r.opts.quick ? 'ראש בראש' : 'חדר ארץ עיר') + '</h2></div>' +
+      (r.opts.quick ? '<div class="center muted">נמצא/ה יריב/ה - לוחצים כדי להתחיל</div>' :
+        '<div class="card center"><div class="label">קוד החדר</div><div class="roomcode">' + esc(r.code) + '</div>' +
+        '<button class="btn small blue" id="share">📤 שלח לחברים</button></div>') +
+      '<div class="card"><div class="label">שחקנים (' + players.length + ')</div><div class="list">' +
+      players.map(p => '<div class="li' + (p.pid === r.me.pid ? ' me' : '') + '"><span class="rank">' + (p.pid === hp ? '👑' : '🙂') + '</span><span class="name">' + esc(p.name) + '</span>' +
+        (p.pid === r.me.pid ? '<span class="tag">את/ה</span>' : '') + '</div>').join('') + '</div></div>' +
+      '<div class="card"><div class="label">זמן לסבב' + (host ? '' : ' (המארח/ת קובע/ת)') + '</div>' +
+      (host ? chipsHtml('sec', AE_TIMER_OPTS, String(r.seconds)) : '<div><b>' + r.seconds + '</b> שניות</div>') + '</div>' +
+      '<div class="muted center" style="font-size:13px">מיועד לשני שחקנים · 3 סבבים · ניקוד מצטבר · כל שחקן מסמן לבד אילו מהתשובות שלו תקינות</div>' +
+      '<div class="spacer"></div>' +
+      (host
+        ? '<button class="btn primary" id="start"' + (players.length < 2 ? ' disabled' : '') + '>' + (players.length < 2 ? 'ממתין/ה לחבר/ה...' : 'התחל משחק ▶') + '</button>'
+        : '<div class="center muted">⏳ ממתין/ה שהמארח/ת יתחיל/תתחיל את המשחק</div>'),
+      confirmLeave
+    );
+    on('#back', confirmLeave);
+    on('#share', () => shareCode(r.code));
+    if (host) {
+      onAll('.chip', el => { r.seconds = +el.dataset.v; aeSendAll(r, { t: 'settings', seconds: r.seconds, phase: 'lobby' }); });
+      on('#start', () => { if (r.players.length >= 2 && aeRoom === r) aeHostStart(r); });
+    }
+  }
+
+  function aeHostStart(r) {
+    r.round = 1; r.scores = {};
+    aeSendAll(r, {
+      t: 'start', letter: aeRandLetter(), cats: aeRandCats(),
+      endsAt: Date.now() + r.seconds * 1000, round: 1, scores: r.scores
+    });
   }
 
   home();
